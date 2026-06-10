@@ -1,0 +1,305 @@
+import React, { useState, useEffect } from 'react';
+import { getStudents, saveStudents, getQuestions, saveQuestions, getExamConfig, saveExamConfig, subscribeToSync } from './utils/sync';
+import { Student, Question, ExamConfig, StudentStatus } from './types';
+import StudentRegistration from './components/StudentRegistration';
+import StudentExam from './components/StudentExam';
+import AdminPanel from './components/AdminPanel';
+import { ShieldCheck, GraduationCap, Award, RefreshCw, XCircle, ArrowRight, CheckCircle2, ChevronRight, AlertTriangle, BookOpen } from 'lucide-react';
+
+export default function App() {
+  const [role, setRole] = useState<'SETUP' | 'STUDENT_EXAM' | 'STUDENT_FINISHED' | 'ADMIN'>('SETUP');
+  const [students, setStudents] = useState<Student[]>([]);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [config, setConfig] = useState<ExamConfig>({ durationMinutes: 15, examTitle: '' });
+  const [currentStudentId, setCurrentStudentId] = useState<string>('');
+
+  // 1. Load initial states on mount
+  useEffect(() => {
+    setStudents(getStudents());
+    setQuestions(getQuestions());
+    setConfig(getExamConfig());
+
+    // 2. Subscribe to real-time tab updates
+    const unsubscribe = subscribeToSync((syncType) => {
+      if (syncType === 'SYNC_STUDENTS') {
+        const freshStudents = getStudents();
+        setStudents(freshStudents);
+      } else if (syncType === 'SYNC_QUESTIONS') {
+        setQuestions(getQuestions());
+      } else if (syncType === 'SYNC_CONFIG') {
+        setConfig(getExamConfig());
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Sync state helpers
+  const handleUpdateStudents = (updatedList: Student[]) => {
+    setStudents(updatedList);
+    saveStudents(updatedList);
+  };
+
+  const handleUpdateQuestions = (updatedList: Question[]) => {
+    setQuestions(updatedList);
+    saveQuestions(updatedList);
+  };
+
+  const handleUpdateConfig = (updatedConfig: ExamConfig) => {
+    setConfig(updatedConfig);
+    saveExamConfig(updatedConfig);
+  };
+
+  // 3. STUDENT FLOW: Registration Action
+  const handleRegisterStudent = (data: { name: string; absentNumber: string; studentClass: string }) => {
+    const existingStudents = getStudents();
+    
+    // Create new student session object
+    const newStudentId = `siswa_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const newStudent: Student = {
+      id: newStudentId,
+      name: data.name,
+      absentNumber: data.absentNumber,
+      studentClass: data.studentClass,
+      status: 'BELUM_MULAI',
+      violationCount: 0,
+      answers: {},
+      lastActive: new Date().toISOString()
+    };
+
+    const updated = [...existingStudents, newStudent];
+    handleUpdateStudents(updated);
+    setCurrentStudentId(newStudentId);
+    setRole('STUDENT_EXAM');
+  };
+
+  // 4. STUDENT FLOW: Violation detection (Strict lock trigger)
+  const handleStudentViolation = (reason: string) => {
+    const freshStudents = getStudents(); // pull fresh to preserve parallel answers
+    const updated = freshStudents.map((s) => {
+      if (s.id === currentStudentId) {
+        if (reason === 'unlocked_locally') {
+          // Unlocked locally via supervisor code entry on student seat
+          return {
+            ...s,
+            status: 'SEDANG_MENGERJAKAN' as const,
+            lockedReason: undefined
+          };
+        }
+
+        // Lock exam immediately
+        return {
+          ...s,
+          status: 'TERKUNCI' as const,
+          lockedReason: reason,
+          violationCount: (s.violationCount || 0) + 1,
+          lastActive: new Date().toISOString()
+        };
+      }
+      return s;
+    });
+
+    handleUpdateStudents(updated);
+  };
+
+  // 5. STUDENT FLOW: Final Answers Submission & Calculation
+  const handleStudentSubmit = (selectedAnswers: Record<string, number>) => {
+    const freshStudents = getStudents();
+    const currentStudentObj = freshStudents.find(s => s.id === currentStudentId);
+    if (!currentStudentObj) return;
+
+    // Direct Score assessment
+    let correctCount = 0;
+    questions.forEach((q) => {
+      const selectedIdx = selectedAnswers[q.id];
+      if (selectedIdx !== undefined && selectedIdx === q.correctAnswerIndex) {
+        correctCount++;
+      }
+    });
+
+    const finalScore = questions.length > 0 ? (correctCount / questions.length) * 100 : 0;
+
+    const updated = freshStudents.map((s) => {
+      if (s.id === currentStudentId) {
+        return {
+          ...s,
+          status: 'SELESAI' as const,
+          answers: selectedAnswers,
+          correctAnswersCount: correctCount,
+          totalQuestions: questions.length,
+          score: finalScore,
+          endTime: new Date().toISOString(),
+          lastActive: new Date().toISOString()
+        };
+      }
+      return s;
+    });
+
+    handleUpdateStudents(updated);
+    setRole('STUDENT_FINISHED');
+  };
+
+  // Fetching currently active student object from reactive state
+  const activeStudent = students.find((s) => s.id === currentStudentId);
+
+  // Monitor real-time status transitions (e.g. if admin unlocks from their dashboard)
+  useEffect(() => {
+    if (role === 'STUDENT_EXAM' && activeStudent && activeStudent.status === 'SELESAI') {
+      setRole('STUDENT_FINISHED');
+    }
+  }, [students, role, activeStudent]);
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-800">
+      {/* 1. SETUP / WELCOME SCREEN */}
+      {role === 'SETUP' && (
+        <StudentRegistration
+          students={students}
+          onRegister={handleRegisterStudent}
+          onAdminLogin={() => setRole('ADMIN')}
+          examTitle={config.examTitle || 'Ujian Digital'}
+          durationMinutes={config.durationMinutes}
+        />
+      )}
+
+      {/* 2. ACTIVE STUDENT EXAM VIEW */}
+      {role === 'STUDENT_EXAM' && activeStudent && (
+        <StudentExam
+          student={activeStudent}
+          questions={questions}
+          durationMinutes={config.durationMinutes}
+          onViolation={handleStudentViolation}
+          onSubmitAnswers={handleStudentSubmit}
+          onExit={() => {
+            // Delete incomplete record & exit
+            const updated = students.filter(s => s.id !== currentStudentId);
+            handleUpdateStudents(updated);
+            setRole('SETUP');
+          }}
+        />
+      )}
+
+      {/* 3. STUDENT SCORE & SUBMISSION ANALYSIS PREVIEW */}
+      {role === 'STUDENT_FINISHED' && activeStudent && (
+        <div className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6 lg:px-8 font-sans">
+          <div className="max-w-2xl mx-auto">
+            
+            {/* Header Success Card */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 text-center relative overflow-hidden mb-6">
+              <div className="absolute top-0 inset-x-0 h-2 bg-emerald-500"></div>
+              
+              <div className="inline-flex items-center justify-center p-3 bg-emerald-50 rounded-full text-emerald-500 mb-4">
+                <CheckCircle2 className="w-12 h-12" />
+              </div>
+
+              <h1 className="text-2xl font-black text-slate-900 tracking-tight">Jawaban Berhasil Dikirim!</h1>
+              <p className="mt-1 text-sm text-slate-500 font-mono">UJIAN SELESAI • DATA TERKAM REKAM AMAN</p>
+
+              {/* Student Metadata Card info */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 my-6 text-left space-y-1 text-sm">
+                <div className="flex justify-between"><span className="text-slate-400 font-medium">Nama Siswa:</span> <span className="font-bold text-slate-800">{activeStudent.name}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400 font-medium">No Absen / Kelas:</span> <span className="font-bold text-slate-800">{activeStudent.absentNumber} / {activeStudent.studentClass}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400 font-medium">Status Pengawasan:</span> <span className="text-green-600 font-bold flex items-center gap-1">Lulus Verifikasi ({activeStudent.violationCount} Pelanggaran)</span></div>
+              </div>
+
+              {/* Real-time score display */}
+              <div className="p-6 bg-slate-900 rounded-2xl text-white">
+                <span className="text-[10px] font-bold text-slate-400 tracking-widest uppercase block mb-1 font-mono">Nilai Hasil Ujian</span>
+                <div className="text-5xl font-black tracking-tight text-yellow-405 text-yellow-400 font-mono">
+                  {activeStudent.score !== undefined ? activeStudent.score.toFixed(1) : '0.0'}
+                </div>
+                <div className="text-xs text-slate-350 mt-2">
+                  Berhasil menjawab benar <strong className="text-white">{activeStudent.correctAnswersCount}</strong> dari <strong className="text-white">{activeStudent.totalQuestions}</strong> pertanyaan.
+                </div>
+              </div>
+            </div>
+
+            {/* Answer Key Analysis (Kunci Jawaban & Pembahasan) */}
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-6 sm:p-8 space-y-6">
+              <h2 className="text-lg font-extrabold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-4 mb-4">
+                <BookOpen className="w-5 h-5 text-indigo-500" />
+                Ulasan Jawaban & Pembahasan
+              </h2>
+
+              <div className="space-y-6">
+                {questions.map((q, qIndex) => {
+                  const studentAnsIdx = activeStudent.answers[q.id];
+                  const isCorrect = studentAnsIdx !== undefined && studentAnsIdx === q.correctAnswerIndex;
+
+                  return (
+                    <div key={q.id} className="border-b border-slate-100 pb-6 last:border-0 last:pb-0">
+                      <div className="flex items-start gap-3">
+                        <span className={`w-6 h-6 rounded-md font-mono text-xs font-bold flex items-center justify-center shrink-0 border mt-0.5 ${
+                          isCorrect
+                            ? 'bg-emerald-500 border-emerald-600 text-white'
+                            : studentAnsIdx !== undefined
+                              ? 'bg-rose-500 border-rose-600 text-white'
+                              : 'bg-slate-400 border-slate-500 text-white'
+                        }`}>
+                          {qIndex + 1}
+                        </span>
+                        
+                        <div className="space-y-3 flex-1">
+                          <h4 className="font-bold text-slate-800 leading-relaxed text-sm">{q.questionText}</h4>
+                          
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                            <div className="p-2.5 rounded-lg border border-slate-100 bg-slate-50">
+                              <span className="text-slate-400 uppercase tracking-wide font-mono text-[9px] block mb-1">Pilihan Anda:</span>
+                              <span className={`font-semibold ${isCorrect ? 'text-emerald-700' : studentAnsIdx !== undefined ? 'text-rose-700' : 'text-slate-400'}`}>
+                                {studentAnsIdx !== undefined
+                                  ? `${String.fromCharCode(65 + studentAnsIdx)}. ${q.options[studentAnsIdx]}`
+                                  : 'Tidak dijawab'}
+                              </span>
+                            </div>
+
+                            {!isCorrect && (
+                              <div className="p-2.5 rounded-lg border border-emerald-100 bg-emerald-50/50">
+                                <span className="text-emerald-600 uppercase tracking-wide font-mono text-[9px] block mb-1">Kunci Jawaban Benar:</span>
+                                <span className="font-semibold text-emerald-800">
+                                  {String.fromCharCode(65 + q.correctAnswerIndex)}. {q.options[q.correctAnswerIndex]}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Navigation Back */}
+              <div className="pt-6 border-t border-slate-100 text-center">
+                <button
+                  id="btn-return-home"
+                  onClick={() => {
+                    setCurrentStudentId('');
+                    setRole('SETUP');
+                  }}
+                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 px-6 rounded-xl transition duration-150 flex items-center justify-center gap-1"
+                >
+                  Selesai & Keluar Aplikasi
+                  <ArrowRight className="w-4 h-4 text-slate-400" />
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* 4. MASTER ADMIN DASHBOARD CONSOLE */}
+      {role === 'ADMIN' && (
+        <AdminPanel
+          students={students}
+          questions={questions}
+          config={config}
+          onUpdateStudents={handleUpdateStudents}
+          onUpdateQuestions={handleUpdateQuestions}
+          onUpdateConfig={handleUpdateConfig}
+          onExit={() => setRole('SETUP')}
+        />
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,1085 @@
+import React, { useState } from 'react';
+import { Users, FileSpreadsheet, RefreshCw, KeyRound, Edit, Trash2, Plus, Save, BookOpen, Clock, X, ChevronRight, Check, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Student, Question, ExamConfig } from '../types';
+
+interface AdminPanelProps {
+  students: Student[];
+  questions: Question[];
+  config: ExamConfig;
+  onUpdateStudents: (updated: Student[]) => void;
+  onUpdateQuestions: (updated: Question[]) => void;
+  onUpdateConfig: (updated: ExamConfig) => void;
+  onExit: () => void;
+}
+
+export default function AdminPanel({
+  students,
+  questions,
+  config,
+  onUpdateStudents,
+  onUpdateQuestions,
+  onUpdateConfig,
+  onExit
+}: AdminPanelProps) {
+  // Tabs for the Admin Control Panel
+  const [activeTab, setActiveTab] = useState<'MONITOR' | 'QUESTIONS' | 'CONFIG'>('MONITOR');
+
+  // Student editor modals state
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editAbsen, setEditAbsen] = useState('');
+  const [editClass, setEditClass] = useState('');
+
+  // Question editor state
+  const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
+  const [isCreatingQuestion, setIsCreatingQuestion] = useState(false);
+  const [qText, setQText] = useState('');
+  const [qOptions, setQOptions] = useState<string[]>(['', '', '', '']);
+  const [qCorrect, setQCorrect] = useState<number>(0);
+
+  // States for CSV/Excel Question Import
+  const [importText, setImportText] = useState('');
+  const [importError, setImportError] = useState('');
+  const [importSuccess, setImportSuccess] = useState('');
+  const [showImportArea, setShowImportArea] = useState(false);
+
+  const handleDownloadTemplate = () => {
+    const headers = [
+      'nomor',
+      'soal',
+      'opsi a',
+      'opsi b',
+      'opsi c',
+      'opsi d',
+      'jawaban yang benar (gunakan a b c d)',
+      'skor tiap soal'
+    ];
+    
+    const sampleRows = [
+      [1, 'Siapakah presiden pertama Indonesia?', 'Ir. Soekarno', 'Moh. Hatta', 'Soeharto', 'B.J. Habibie', 'a', 10],
+      [2, 'Berapakah hasil kali dari 10 dikali 5?', '15', '50', '105', '5', 'b', 10]
+    ];
+
+    const csvContent = '\uFEFF' + [
+      headers.join(','),
+      ...sampleRows.map(row => row.map(val => `"${val.toString().replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'template_soal_ujian.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      setImportText(content || '');
+    };
+    reader.readAsText(file, 'UTF-8');
+  };
+
+  const parseCSVData = (text: string, mode: 'APPEND' | 'OVERWRITE') => {
+    try {
+      setImportError('');
+      setImportSuccess('');
+
+      if (!text.trim()) {
+        setImportError('Teks data kosong atau tidak terbaca.');
+        return;
+      }
+
+      // Split lines, filter out empty rows
+      const lines = text.split(/\r?\n/).map(line => line.trim()).filter(line => line.length > 0);
+      if (lines.length <= 1) {
+        setImportError('Format file tidak lengkap. Harap sertakan baris header dan minimal satu baris soal.');
+        return;
+      }
+
+      // Determine separator (comma or semicolon)
+      const firstLine = lines[0];
+      const separator = firstLine.includes(';') ? ';' : ',';
+
+      // Robust CSV layout parser line splitter that honors double quotes
+      const parseCSVLine = (line: string, sep: string): string[] => {
+        const result: string[] = [];
+        let insideQuote = false;
+        let entry = '';
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') {
+            insideQuote = !insideQuote;
+          } else if (char === sep && !insideQuote) {
+            result.push(entry.trim());
+            entry = '';
+          } else {
+            entry += char;
+          }
+        }
+        result.push(entry.trim());
+        return result.map(v => {
+          let clean = v;
+          if (clean.startsWith('"') && clean.endsWith('"')) {
+            clean = clean.slice(1, -1);
+          }
+          return clean.replace(/""/g, '"');
+        });
+      };
+
+      const importedQs: Question[] = [];
+      
+      // Parse questions lines, skip heading line [0]
+      for (let i = 1; i < lines.length; i++) {
+        const columns = parseCSVLine(lines[i], separator);
+        if (columns.length < 7) {
+          continue;
+        }
+
+        const soalText = columns[1];
+        const optA = columns[2];
+        const optB = columns[3];
+        const optC = columns[4];
+        const optD = columns[5];
+        const correctAnswerChar = (columns[6] || '').trim().toLowerCase();
+        
+        if (!soalText || !optA || !optB || !optC || !optD) {
+          continue;
+        }
+
+        let correctIdx = 0;
+        if (correctAnswerChar === 'b') correctIdx = 1;
+        else if (correctAnswerChar === 'c') correctIdx = 2;
+        else if (correctAnswerChar === 'd') correctIdx = 3;
+
+        importedQs.push({
+          id: `q_imported_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 4)}`,
+          questionText: soalText,
+          options: [optA, optB, optC, optD],
+          correctAnswerIndex: correctIdx
+        });
+      }
+
+      if (importedQs.length === 0) {
+        setImportError('Format kolom tidak cocok atau data kosong. Mohon periksa kembali kolom-kolom template.');
+        return;
+      }
+
+      if (mode === 'OVERWRITE') {
+        onUpdateQuestions(importedQs);
+        setImportSuccess(`Sukses mengganti seluruh bank soal dengan ${importedQs.length} butir soal baru dari Excel!`);
+      } else {
+        onUpdateQuestions([...questions, ...importedQs]);
+        setImportSuccess(`Sukses menambahkan ${importedQs.length} butir soal baru ke bank soal aktif!`);
+      }
+
+      setImportText('');
+    } catch (err: any) {
+      setImportError(`Gagal membaca file: ${err.message || err}`);
+    }
+  };
+
+  // --- ACTIONS: STUDENT MANAGEMENT ---
+
+  // Real-time unlock! Set status back to 'SEDANG_MENGERJAKAN'
+  const handleUnlockStudent = (studentId: string) => {
+    const updated = students.map((s) => {
+      if (s.id === studentId) {
+        return {
+          ...s,
+          status: 'SEDANG_MENGERJAKAN' as const,
+          lockedReason: undefined
+        };
+      }
+      return s;
+    });
+    onUpdateStudents(updated);
+  };
+
+  // Reset student entire attempt
+  const handleResetStudentAttempt = (studentId: string) => {
+    if (!window.confirm('Apakah Anda yakin ingin mereset seluruh pengerjaan siswa ini? Jawaban yang ada akan dihapus dan siswa harus masuk layar penuh lagi.')) {
+      return;
+    }
+    const updated = students.map((s) => {
+      if (s.id === studentId) {
+        return {
+          ...s,
+          status: 'BELUM_MULAI' as const,
+          answers: {},
+          violationCount: 0,
+          lockedReason: undefined,
+          score: undefined,
+          correctAnswersCount: undefined,
+          startTime: undefined,
+          endTime: undefined
+        };
+      }
+      return s;
+    });
+    onUpdateStudents(updated);
+  };
+
+  // Save edited details
+  const handleSaveStudentEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStudent) return;
+
+    const updated = students.map((s) => {
+      if (s.id === editingStudent.id) {
+        return {
+          ...s,
+          name: editName.trim(),
+          absentNumber: editAbsen.trim(),
+          studentClass: editClass.trim().toUpperCase()
+        };
+      }
+      return s;
+    });
+    onUpdateStudents(updated);
+    setEditingStudent(null);
+  };
+
+  // Delete student completely
+  const handleDeleteStudent = (studentId: string) => {
+    if (!window.confirm('Hapus siswa dari daftar ujian? Semua riwayat skor akan hilang.')) {
+      return;
+    }
+    const updated = students.filter((s) => s.id !== studentId);
+    onUpdateStudents(updated);
+  };
+
+  // --- ACTIONS: EXPORT NILAI TO EXCEL (CSV Format with excel compatibility) ---
+  const handleExportToExcel = () => {
+    if (students.length === 0) {
+      alert('Belum ada data siswa untuk diekspor!');
+      return;
+    }
+
+    // Header row
+    const headers = [
+      'No',
+      'Nama Siswa',
+      'No Absen',
+      'Kelas',
+      'Status Ujian',
+      'Pelanggaran Proktor (Lock Count)',
+      'Total Benar',
+      'Jumlah Soal',
+      'Nilai Akhir (%)',
+      'Waktu Mulai',
+      'Waktu Selesai'
+    ];
+
+    const rows = students.map((s, idx) => {
+      const correctCount = s.correctAnswersCount !== undefined ? s.correctAnswersCount : '-';
+      const totalCount = s.totalQuestions !== undefined ? s.totalQuestions : questions.length;
+      const finalScore = s.score !== undefined ? s.score.toFixed(1) : '-';
+      
+      const formatTimeText = (isoStr?: string) => {
+        if (!isoStr) return '-';
+        const d = new Date(isoStr);
+        return `${d.toLocaleDateString('id-ID')} ${d.toLocaleTimeString('id-ID')}`;
+      };
+
+      return [
+        idx + 1,
+        `"${s.name.replace(/"/g, '""')}"`,
+        s.absentNumber,
+        `"${s.studentClass}"`,
+        s.status === 'TERKUNCI' ? 'TERKOMPROMISI / TERKUNCI' : s.status,
+        s.violationCount,
+        correctCount,
+        totalCount,
+        finalScore,
+        formatTimeText(s.startTime),
+        formatTimeText(s.endTime)
+      ];
+    });
+
+    // Excel friendly CSV joining lines with BOM for correct character rendering
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    
+    // Download chemical reaction
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `rekap_nilai_proktor_${config.examTitle.replace(/\s+/g, '_').toLowerCase()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // --- ACTIONS: BANK SOAL CRUD ---
+  const handleSaveQuestion = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!qText.trim()) return alert('Teks soal wajib terisi!');
+    if (qOptions.some(opt => !opt.trim())) return alert('Semua pilihan jawaban wajib diisi!');
+
+    if (isCreatingQuestion) {
+      const newQ: Question = {
+        id: `q_generated_${Date.now()}`,
+        questionText: qText.trim(),
+        options: qOptions.map(o => o.trim()),
+        correctAnswerIndex: qCorrect
+      };
+      onUpdateQuestions([...questions, newQ]);
+    } else if (editingQuestion) {
+      const updated = questions.map((q) => {
+        if (q.id === editingQuestion.id) {
+          return {
+            ...q,
+            questionText: qText.trim(),
+            options: qOptions.map(o => o.trim()),
+            correctAnswerIndex: qCorrect
+          };
+        }
+        return q;
+      });
+      onUpdateQuestions(updated);
+    }
+
+    // Reset questions form status
+    setIsCreatingQuestion(false);
+    setEditingQuestion(null);
+    setQText('');
+    setQOptions(['', '', '', '']);
+    setQCorrect(0);
+  };
+
+  const handleDeleteQuestion = (questionId: string) => {
+    if (questions.length <= 1) {
+      alert('Sistem membutuhkan minimal 1 soal dalam bank soal ujian!');
+      return;
+    }
+    if (!window.confirm('Apakah Anda yakin ingin menghapus soal ini?')) {
+      return;
+    }
+    const updated = questions.filter(q => q.id !== questionId);
+    onUpdateQuestions(updated);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+      {/* Admin Nav Bar */}
+      <header className="bg-slate-950 text-white shadow-xl px-6 py-5 sticky top-0 z-40">
+        <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center p-2.5 bg-indigo-500 rounded-xl text-white">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] bg-indigo-600 px-1.5 py-0.5 rounded font-mono font-bold tracking-widest text-indigo-100">
+                  MASTER CONSOLE
+                </span>
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className="text-[11px] text-emerald-400 font-mono font-bold">REAL-TIME SYNC</span>
+              </div>
+              <h1 className="text-xl font-bold tracking-tight">Kabin Kontrol Pengawas & Proktor</h1>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              id="btn-admin-export"
+              onClick={handleExportToExcel}
+              className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold rounded-xl text-xs sm:text-sm transition flex items-center gap-2"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              Ekspor Nilai (Excel)
+            </button>
+            <button
+              id="btn-exit-admin"
+              onClick={onExit}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-350 font-bold rounded-xl text-xs sm:text-sm transition"
+            >
+              Keluar
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Primary Sub Tabs */}
+      <div className="bg-white border-b border-slate-200">
+        <div className="max-w-6xl mx-auto flex">
+          <button
+            onClick={() => setActiveTab('MONITOR')}
+            className={`px-6 py-4 font-bold text-sm border-b-2 flex items-center gap-2 transition ${
+              activeTab === 'MONITOR'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            Monitoring Siswa ({students.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('QUESTIONS')}
+            className={`px-6 py-4 font-bold text-sm border-b-2 flex items-center gap-2 transition ${
+              activeTab === 'QUESTIONS'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <BookOpen className="w-4 h-4" />
+            Bank Soal Ujian ({questions.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('CONFIG')}
+            className={`px-6 py-4 font-bold text-sm border-b-2 flex items-center gap-2 transition ${
+              activeTab === 'CONFIG'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Clock className="w-4 h-4" />
+            Konfigurasi Ujian
+          </button>
+        </div>
+      </div>
+
+      {/* Main Panel Content Area */}
+      <main className="max-w-6xl mx-auto w-full flex-1 p-4 sm:p-6 pb-20">
+        
+        {/* TAB 1: MONITORING TABLE */}
+        {activeTab === 'MONITOR' && (
+          <div className="space-y-6">
+            
+            {/* Quick Metrics Banner */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="text-xs text-slate-400 font-bold font-mono">TOTAL SISWA</div>
+                <div className="text-2xl font-extrabold text-slate-800 mt-1">{students.length}</div>
+              </div>
+              <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl">
+                <div className="text-xs text-emerald-600 font-bold font-mono">SELESAI</div>
+                <div className="text-2xl font-extrabold text-emerald-800 mt-1">
+                  {students.filter(s => s.status === 'SELESAI').length}
+                </div>
+              </div>
+              <div className="bg-blue-50 border border-blue-200 p-4 rounded-2xl">
+                <div className="text-xs text-blue-600 font-bold font-mono">SEDANG MENGERJAKAN</div>
+                <div className="text-2xl font-extrabold text-blue-800 mt-1">
+                  {students.filter(s => s.status === 'SEDANG_MENGERJAKAN').length}
+                </div>
+              </div>
+              <div className="bg-red-50 border border-red-200 p-4 rounded-2xl">
+                <div className="text-xs text-red-650 font-bold font-mono flex items-center gap-1">
+                  TERKUNCI / BLOCKED
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-500 inline" />
+                </div>
+                <div className="text-2xl font-extrabold text-red-700 mt-1">
+                  {students.filter(s => s.status === 'TERKUNCI').length}
+                </div>
+              </div>
+            </div>
+
+            {/* Students Table */}
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+              <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                <h3 className="font-bold text-slate-800">Daftar Kehadiran & Nilai Siswa</h3>
+                <span className="text-xs text-slate-400 italic">Nilai otomatis dikalkulasi real-time saat siswa klik kumpul atau waktu habis</span>
+              </div>
+
+              {students.length === 0 ? (
+                <div className="text-center py-16 px-4">
+                  <div className="inline-flex p-3 bg-slate-100 rounded-full text-slate-400 mb-2">
+                    <Users className="w-8 h-8" />
+                  </div>
+                  <h4 className="font-bold text-slate-700">Belum ada siswa yang mendaftar</h4>
+                  <p className="text-xs text-slate-400 mt-1">Siswa akan muncul di sini secara real-time setelah mereka menginput nama di lembar depan ujian.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-slate-50 text-slate-500 text-xs font-mono uppercase tracking-wider border-b border-slate-200">
+                        <th className="px-6 py-3">Absen</th>
+                        <th className="px-6 py-3">Informasi Siswa</th>
+                        <th className="px-6 py-3">Kelas</th>
+                        <th className="px-6 py-3">Status Proktor</th>
+                        <th className="px-6 py-3">Pelanggaran</th>
+                        <th className="px-6 py-3">Jawaban</th>
+                        <th className="px-6 py-3">Nilai</th>
+                        <th className="px-6 py-3 text-right">Tindakan Admin</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {students.map((s) => {
+                        const scoreBg = s.score !== undefined && s.score >= 70 ? 'bg-green-100 text-green-800' : 'bg-rose-100 text-rose-800';
+                        
+                        return (
+                          <tr key={s.id} className="hover:bg-slate-50/50 transition duration-150">
+                            <td className="px-6 py-4 font-mono font-bold text-slate-500">
+                              {s.absentNumber.padStart(2, '0')}
+                            </td>
+                            <td className="px-6 py-4 font-semibold text-slate-800">
+                              <div>{s.name}</div>
+                              <div className="text-[10px] text-slate-400 font-mono mt-0.5 uppercase">ID: {s.id.slice(0, 8)}</div>
+                            </td>
+                            <td className="px-6 py-4 font-semibold text-slate-600 font-mono">
+                              {s.studentClass}
+                            </td>
+                            <td className="px-6 py-4">
+                              {s.status === 'BELUM_MULAI' && (
+                                <span className="px-2.5 py-1 text-xs font-semibold bg-slate-100 text-slate-500 rounded-full font-mono">BELUM MULAI</span>
+                              )}
+                              {s.status === 'SEDANG_MENGERJAKAN' && (
+                                <span className="px-2.5 py-1 text-xs font-semibold bg-blue-100 text-blue-800 rounded-full font-mono animate-pulse">SEDANG KERJA</span>
+                              )}
+                              {s.status === 'SELESAI' && (
+                                <span className="px-2.5 py-1 text-xs font-semibold bg-emerald-150 text-emerald-800 rounded-full font-mono font-bold">SELESAI</span>
+                              )}
+                              {s.status === 'TERKUNCI' && (
+                                <div className="space-y-1">
+                                  <span className="px-2.5 py-1 text-xs font-bold bg-rose-600 text-white rounded-md font-mono inline-flex items-center gap-1">
+                                    <AlertTriangle className="w-3.5 h-3.5" />
+                                    TERKUNCI
+                                  </span>
+                                  <div className="text-[10px] text-red-650 font-bold max-w-[150px] leading-tight">
+                                    {s.lockedReason || 'Ganti screen tab'}
+                                  </div>
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 text-center font-mono font-semibold">
+                              <span className={s.violationCount > 0 ? 'text-red-600 font-bold' : 'text-slate-400'}>
+                                {s.violationCount}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 font-mono text-xs text-slate-400">
+                              {s.answers ? `${Object.keys(s.answers).length}/${questions.length}` : '0'}
+                            </td>
+                            <td className="px-6 py-4 font-bold">
+                              {s.score !== undefined ? (
+                                <span className={`px-2.5 py-1 text-xs font-extrabold rounded-md ${scoreBg} font-mono`}>
+                                  {s.score.toFixed(1)} / 100
+                                </span>
+                              ) : (
+                                <span className="text-slate-300 font-mono">-</span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 text-right space-x-1.5 whitespace-nowrap">
+                              {/* Option to Unlock (Reset Status to Sedang Mengerjakan) */}
+                              {s.status === 'TERKUNCI' && (
+                                <button
+                                  id={`btn-unlock-${s.id}`}
+                                  onClick={() => handleUnlockStudent(s.id)}
+                                  className="px-2.5 py-1 text-xs font-bold bg-yellow-400 hover:bg-yellow-300 text-slate-900 rounded-lg shadow-xs transition"
+                                  title="Buka blokir dan izinkan lanjut ujian"
+                                >
+                                  Unlock Ujian
+                                </button>
+                              )}
+
+                              <button
+                                id={`btn-edit-student-${s.id}`}
+                                onClick={() => {
+                                  setEditingStudent(s);
+                                  setEditName(s.name);
+                                  setEditAbsen(s.absentNumber);
+                                  setEditClass(s.studentClass);
+                                }}
+                                className="p-1 px-2 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition"
+                                title="Edit Data Siswa"
+                              >
+                                <Edit className="w-3.5 h-3.5 inline" />
+                              </button>
+
+                              <button
+                                id={`btn-reset-stud-${s.id}`}
+                                onClick={() => handleResetStudentAttempt(s.id)}
+                                className="p-1 px-2 text-slate-500 hover:text-yellow-600 hover:bg-slate-100 rounded-md transition"
+                                title="Reset Sesi Siswa"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5 inline" />
+                              </button>
+
+                              <button
+                                id={`btn-delete-student-${s.id}`}
+                                onClick={() => handleDeleteStudent(s.id)}
+                                className="p-1 px-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition"
+                                title="Hapus Siswa"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 inline" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: BANK SOAL */}
+        {activeTab === 'QUESTIONS' && (
+          <div className="space-y-6">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200">
+              <div>
+                <h3 className="font-extrabold text-slate-800 text-lg">Kelola Bank Soal Ujian</h3>
+                <p className="text-xs text-slate-505 text-slate-500 mt-1">
+                  Perubahan bank soal bersifat instan demi fleksibilitas ujian proktor. Anda juga dapat melakukan import soal massal sekaligus via format Excel / CSV.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  id="btn-download-excel-template"
+                  onClick={handleDownloadTemplate}
+                  className="px-4 py-2.5 bg-slate-105 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm rounded-xl transition flex items-center justify-center gap-1.5"
+                  title="Unduh file template Excel CSV untuk diisi"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  Unduh Template Excel
+                </button>
+                <button
+                  id="btn-toggle-import-panel"
+                  onClick={() => {
+                    setShowImportArea(!showImportArea);
+                    setImportError('');
+                    setImportSuccess('');
+                  }}
+                  className={`px-4 py-2.5 font-bold text-sm rounded-xl transition flex items-center justify-center gap-1.5 ${
+                    showImportArea
+                      ? 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-200'
+                      : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-850 border border-emerald-200'
+                  }`}
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  {showImportArea ? 'Tutup Panel Import' : 'Import dari Excel / CSV'}
+                </button>
+                <button
+                  id="btn-add-question-trigger"
+                  onClick={() => {
+                    setIsCreatingQuestion(true);
+                    setEditingQuestion(null);
+                    setQText('');
+                    setQOptions(['', '', '', '']);
+                    setQCorrect(0);
+                    setShowImportArea(false);
+                  }}
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-505 hover:bg-indigo-500 text-white font-bold text-sm rounded-xl transition flex items-center justify-center gap-1.5 self-start sm:self-auto shadow-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  Tambah Soal Baru
+                </button>
+              </div>
+            </div>
+
+            {/* Collapsible Excel / CSV Import Zone */}
+            {showImportArea && (
+              <div className="bg-white rounded-2xl border-2 border-emerald-500 p-6 shadow-md space-y-4 animate-fade-in">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <h4 className="font-extrabold text-slate-800 flex items-center gap-2 text-base">
+                    <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+                    Panel Import Soal dari Excel (.csv)
+                  </h4>
+                  <button
+                    onClick={() => setShowImportArea(false)}
+                    className="p-1 hover:bg-slate-100 rounded-full transition text-slate-400"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="p-4 bg-emerald-50/50 border border-emerald-110 border-emerald-100 rounded-xl space-y-2.5 text-xs text-slate-600">
+                  <p className="font-bold text-emerald-950">Aturan Penulisan Template Excel / CSV:</p>
+                  <ol className="list-decimal list-inside space-y-1">
+                    <li>Gunakan file template Excel berformat CSV yang didownload di atas agar urutan kolomnya tepat.</li>
+                    <li>Satu baris di bawah header baris mewakili 1 butir soal.</li>
+                    <li>Kolomnya terdiri dari: <strong className="text-emerald-990 text-emerald-900 font-mono">nomor, soal, opsi a, opsi b, opsi c, opsi d, jawaban yang benar (gunakan a b c d), skor tiap soal</strong></li>
+                    <li>Jawaban yang benar **harus** ditulis menggunakan salah satu huruf: <strong className="text-emerald-900 font-mono">a, b, c, atau d</strong> (case-insensitive).</li>
+                  </ol>
+                </div>
+
+                {importError && (
+                  <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs font-semibold flex items-center gap-2 animate-pulse">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-red-500" />
+                    <span>{importError}</span>
+                  </div>
+                )}
+
+                {importSuccess && (
+                  <div className="p-4 bg-emerald-100 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold flex items-center gap-2">
+                    <Check className="w-4 h-4 shrink-0 text-emerald-600 font-bold" />
+                    <span>{importSuccess}</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* File Upload Zone */}
+                  <div className="border-2 border-dashed border-slate-200 hover:border-emerald-500 rounded-xl p-5 text-center transition flex flex-col justify-center items-center bg-slate-50/50">
+                    <FileSpreadsheet className="w-10 h-10 text-slate-400 mb-2" />
+                    <span className="text-xs font-semibold text-slate-700 block mb-1">Pilih File CSV Hasil Ekspor Excel</span>
+                    <span className="text-[10px] text-slate-400 block mb-4">Pastikan encoding UTF-8 untuk karakter khusus</span>
+                    <input
+                      type="file"
+                      accept=".csv"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                      id="csv-file-picker"
+                    />
+                    <label
+                      htmlFor="csv-file-picker"
+                      className="px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-800 text-slate-700 font-bold text-xs rounded-lg cursor-pointer transition inline-block shadow-xs"
+                    >
+                      Pilih Berkas (.csv)
+                    </label>
+                  </div>
+
+                  {/* Raw Text Paste Zone */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 font-mono uppercase tracking-wider mb-2">Atau Paste Teks CSV Langsung</label>
+                    <textarea
+                      placeholder="nomor,soal,opsi a,opsi b,opsi c,opsi d,jawaban yang benar (gunakan a b c d),skor tiap soal&#10;1,Siapakah bapak pramuka dunia?,S Baden Powell,Ir Soekarno,Yuri Gagarin,Liem Swie King,a,10"
+                      value={importText}
+                      onChange={(e) => setImportText(e.target.value)}
+                      rows={5}
+                      className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-emerald-500 font-mono text-xs rounded-xl focus:outline-none focus:bg-white transition"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImportText('');
+                      setImportError('');
+                      setImportSuccess('');
+                    }}
+                    className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-50 border border-slate-200 rounded-lg transition"
+                  >
+                    Kosongkan
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => parseCSVData(importText, 'APPEND')}
+                    disabled={!importText.trim()}
+                    className={`px-4 py-2 text-xs font-bold rounded-lg transition ${
+                      importText.trim()
+                        ? 'bg-slate-900 hover:bg-slate-800 text-white'
+                        : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                    }`}
+                  >
+                    Tambah ke Soal Aktif (Append)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm('PERINGATAN: Opsi Overwrite akan menghapus SELURUH bank soal aktif Anda saat ini dan menggantinya dengan yang baru di file Excel. Apakah Anda yakin?')) {
+                        parseCSVData(importText, 'OVERWRITE');
+                      }
+                    }}
+                    disabled={!importText.trim()}
+                    className={`px-4 py-2 text-xs font-semibold rounded-lg transition ${
+                      importText.trim()
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                        : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                    }`}
+                  >
+                    Ganti Semua Soal (Overwrite)
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Editing / Creating state view */}
+            {(isCreatingQuestion || editingQuestion) && (
+              <div className="bg-white rounded-2xl border border-indigo-200 p-6 shadow-sm ring-1 ring-indigo-100 animate-fade-in">
+                <div className="flex items-center justify-between border-b border-indigo-55 pb-4 mb-5">
+                  <h4 className="font-bold text-indigo-900 flex items-center gap-2">
+                    <BookOpen className="w-5 h-5 text-indigo-601" />
+                    {isCreatingQuestion ? 'Buat Soal Ujian Baru' : 'Edit Soal Ujian'}
+                  </h4>
+                  <button
+                    onClick={() => {
+                      setIsCreatingQuestion(false);
+                      setEditingQuestion(null);
+                    }}
+                    className="p-1 hover:bg-slate-100 rounded-full transition text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveQuestion} className="space-y-5">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase font-mono tracking-wider mb-2">Teks Soal / Pertanyaan</label>
+                    <textarea
+                      required
+                      placeholder="Tuliskan pertanyaan ujian di sini..."
+                      value={qText}
+                      onChange={(e) => setQText(e.target.value)}
+                      rows={3}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl text-slate-800 focus:outline-none transition"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <label className="block text-xs font-semibold text-slate-500 uppercase font-mono tracking-wider">Pilihlah Opsi Jawaban Ganda beserta Kunci</label>
+                    
+                    {qOptions.map((opt, oIdx) => {
+                      const letter = String.fromCharCode(65 + oIdx);
+                      const isCorrect = qCorrect === oIdx;
+
+                      return (
+                        <div key={oIdx} className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setQCorrect(oIdx)}
+                            className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold font-mono text-sm border shrink-0 transition-all ${
+                              isCorrect
+                                ? 'bg-emerald-500 border-emerald-600 text-white'
+                                : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-400 hover:text-slate-600'
+                            }`}
+                            title={isCorrect ? 'Ini adalah kunci jawaban' : 'Jadikan kunci jawaban'}
+                          >
+                            {isCorrect ? <Check className="w-4 h-4" /> : letter}
+                          </button>
+                          <input
+                            type="text"
+                            required
+                            placeholder={`Tulis pilihan jawaban untuk opsi ${letter}...`}
+                            value={opt}
+                            onChange={(e) => {
+                              const updated = [...qOptions];
+                              updated[oIdx] = e.target.value;
+                              setQOptions(updated);
+                            }}
+                            className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl text-slate-800 text-sm focus:outline-none transition"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="border-t border-slate-100 pt-5 flex justify-end gap-2 text-sm pt-4">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCreatingQuestion(false);
+                        setEditingQuestion(null);
+                      }}
+                      className="px-4 py-2.5 font-bold text-slate-500 hover:bg-slate-50 rounded-xl transition border border-slate-200"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      id="btn-save-questions-db"
+                      className="px-5 py-2.5 bg-indigo-650 hover:bg-indigo-600 text-white font-extrabold rounded-xl transition duration-150 flex items-center gap-1 shadow-sm"
+                    >
+                      <Save className="w-4 h-4" />
+                      Simpan Soal
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {/* List of existing questions and answers key */}
+            <div className="space-y-4">
+              {questions.map((q, idx) => (
+                <div key={q.id} className="bg-white border border-slate-200 rounded-2xl p-6 relative hover:shadow-xs transition">
+                  <div className="flex items-start justify-between gap-4 mb-4">
+                    <div>
+                      <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded font-mono font-semibold text-slate-500">
+                        SOAL #{idx + 1}
+                      </span>
+                      <h4 className="font-bold text-slate-800 text-base mt-2 leading-relaxed">{q.questionText}</h4>
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        id={`btn-edit-q-${q.id}`}
+                        onClick={() => {
+                          setEditingQuestion(q);
+                          setIsCreatingQuestion(false);
+                          setQText(q.questionText);
+                          setQOptions(q.options);
+                          setQCorrect(q.correctAnswerIndex);
+                        }}
+                        className="p-1 px-2 hover:bg-slate-100 text-slate-500 hover:text-indigo-600 rounded-md transition"
+                        title="Edit Soal"
+                      >
+                        <Edit className="w-3.5 h-3.5 inline" />
+                      </button>
+                      <button
+                        id={`btn-delete-q-${q.id}`}
+                        onClick={() => handleDeleteQuestion(q.id)}
+                        className="p-1 px-2 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-md transition"
+                        title="Hapus Soal"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 inline" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4 pt-4 border-t border-slate-50 text-xs">
+                    {q.options.map((opt, oIdx) => {
+                      const optLetter = String.fromCharCode(65 + oIdx);
+                      const isCorrect = q.correctAnswerIndex === oIdx;
+
+                      return (
+                        <div
+                          key={oIdx}
+                          className={`p-2.5 rounded-lg flex items-center gap-2 border ${
+                            isCorrect
+                              ? 'bg-emerald-50 border-emerald-250 text-emerald-800 font-semibold'
+                              : 'bg-slate-50 border-transparent text-slate-500'
+                          }`}
+                        >
+                          <span className={`w-5 h-5 rounded font-bold font-mono text-[11px] flex items-center justify-center shrink-0 border ${
+                            isCorrect
+                              ? 'bg-emerald-500 border-emerald-600 text-white'
+                              : 'bg-white border-slate-200 text-slate-400'
+                          }`}>
+                            {optLetter}
+                          </span>
+                          <span className="truncate">{opt}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: CONFIGURATION SETTINGS */}
+        {activeTab === 'CONFIG' && (
+          <div className="max-w-xl mx-auto bg-white p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+            <div>
+              <h3 className="font-extrabold text-slate-800 text-lg">Konfigurasi Lembar Kerja Ujian</h3>
+              <p className="text-xs text-slate-400 font-mono mt-0.5">EDIT GENERAL PARAMETERS & CONTROLS</p>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                alert('Konfigurasi ujian sukses diperbarui secara instan!');
+              }}
+              className="space-y-5"
+            >
+              <div>
+                <label className="block text-xs font-bold text-slate-500 font-mono tracking-wider uppercase mb-2">Judul Dokumen Ujian</label>
+                <input
+                  type="text"
+                  required
+                  value={config.examTitle}
+                  onChange={(e) => onUpdateConfig({ ...config, examTitle: e.target.value })}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl text-slate-800 text-sm focus:outline-none transition"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 font-mono tracking-wider uppercase mb-2">Durasi Ujian (Menit)</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    max="300"
+                    value={config.durationMinutes}
+                    onChange={(e) => onUpdateConfig({ ...config, durationMinutes: Math.max(1, parseInt(e.target.value) || 1) })}
+                    className="w-32 px-4 py-3 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl text-slate-800 text-sm text-center font-mono focus:outline-none transition font-bold"
+                  />
+                  <span className="text-sm font-semibold text-slate-500">Menit Hitung Mundur</span>
+                </div>
+              </div>
+
+              <div className="p-4 bg-teal-50 border border-teal-200 rounded-xl text-xs text-teal-800 space-y-2">
+                <div className="font-bold uppercase tracking-wider font-mono flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-teal-600" />
+                  Kombinasi Pengawasan Aktif
+                </div>
+                <p className="leading-relaxed text-slate-650">
+                  Semua form konfigurasi ini langsung tersambung ke layar komputer siswa peserta ujian secara aman. Ketika durasi diubah, nilai hitung mundur sisa ujian siswa akan mendaftar ulang secara otomatis.
+                </p>
+              </div>
+            </form>
+          </div>
+        )}
+      </main>
+
+      {/* Editing Student Detail Modal */}
+      {editingStudent && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-sm w-full p-6 animate-fade-in">
+            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2 border-b border-slate-100 pb-3">
+              <Edit className="w-5 h-5 text-indigo-5000 text-indigo-500" />
+              Edit Data Siswa
+            </h3>
+
+            <form onSubmit={handleSaveStudentEdit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase font-mono tracking-wider mb-2">Nama Siswa</label>
+                <input
+                  type="text"
+                  required
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-lg text-slate-800 text-sm focus:outline-none transition"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase font-mono tracking-wider mb-2">No Absen</label>
+                  <input
+                    type="number"
+                    required
+                    value={editAbsen}
+                    onChange={(e) => setEditAbsen(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-lg text-slate-800 text-sm focus:outline-none transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase font-mono tracking-wider mb-2">Kelas</label>
+                  <input
+                    type="text"
+                    required
+                    value={editClass}
+                    onChange={(e) => setEditClass(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-lg text-slate-800 text-sm focus:outline-none transition"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  id="btn-edit-stud-cancel"
+                  onClick={() => setEditingStudent(null)}
+                  className="flex-1 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-50 border border-slate-200 rounded-lg transition"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  id="btn-edit-stud-save"
+                  className="flex-1 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition"
+                >
+                  Simpan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
