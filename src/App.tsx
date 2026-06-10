@@ -103,21 +103,45 @@ export default function App() {
   };
 
   // 5. STUDENT FLOW: Final Answers Submission & Calculation
-  const handleStudentSubmit = (selectedAnswers: Record<string, number>) => {
+  const handleStudentSubmit = (selectedAnswers: Record<string, number | number[]>) => {
     const freshStudents = getStudents();
     const currentStudentObj = freshStudents.find(s => s.id === currentStudentId);
     if (!currentStudentObj) return;
 
     // Direct Score assessment
     let correctCount = 0;
+    let earnedPoints = 0;
+    let maxPoints = 0;
+
     questions.forEach((q) => {
-      const selectedIdx = selectedAnswers[q.id];
-      if (selectedIdx !== undefined && selectedIdx === q.correctAnswerIndex) {
-        correctCount++;
+      const qScore = typeof q.score === 'number' ? q.score : 10;
+      maxPoints += qScore;
+
+      const ans = selectedAnswers[q.id];
+      if (ans !== undefined) {
+        if (q.type === 'MR') {
+          const correctSet = q.correctAnswerIndices || [];
+          const studentSet = Array.isArray(ans) ? ans : [ans];
+          const isCorrect = studentSet.length === correctSet.length &&
+            studentSet.every(idx => correctSet.includes(idx));
+          
+          if (isCorrect) {
+            correctCount++;
+            earnedPoints += qScore;
+          }
+        } else {
+          // MC
+          const correctIdx = typeof q.correctAnswerIndex === 'number' ? q.correctAnswerIndex : (q.correctAnswerIndices?.[0] ?? 0);
+          const isCorrect = Array.isArray(ans) ? ans.includes(correctIdx) : ans === correctIdx;
+          if (isCorrect) {
+            correctCount++;
+            earnedPoints += qScore;
+          }
+        }
       }
     });
 
-    const finalScore = questions.length > 0 ? (correctCount / questions.length) * 100 : 0;
+    const finalScore = maxPoints > 0 ? (earnedPoints / maxPoints) * 100 : 0;
 
     const updated = freshStudents.map((s) => {
       if (s.id === currentStudentId) {
@@ -223,8 +247,40 @@ export default function App() {
 
               <div className="space-y-6">
                 {questions.map((q, qIndex) => {
-                  const studentAnsIdx = activeStudent.answers[q.id];
-                  const isCorrect = studentAnsIdx !== undefined && studentAnsIdx === q.correctAnswerIndex;
+                  const studentAns = activeStudent.answers[q.id];
+                  const hasAnswered = studentAns !== undefined && studentAns !== null && (!Array.isArray(studentAns) || studentAns.length > 0);
+                  
+                  let isCorrect = false;
+                  if (hasAnswered) {
+                    if (q.type === 'MR') {
+                      const correctSet = q.correctAnswerIndices || [];
+                      const studentSet = Array.isArray(studentAns) ? studentAns : [studentAns];
+                      isCorrect = studentSet.length === correctSet.length &&
+                        studentSet.every(idx => correctSet.includes(idx));
+                    } else {
+                      const correctIdx = typeof q.correctAnswerIndex === 'number' ? q.correctAnswerIndex : (q.correctAnswerIndices?.[0] ?? 0);
+                      isCorrect = Array.isArray(studentAns) ? studentAns.includes(correctIdx) : studentAns === correctIdx;
+                    }
+                  }
+
+                  const getStudentAnswerText = () => {
+                    if (!hasAnswered) return 'Tidak dijawab';
+                    if (Array.isArray(studentAns)) {
+                      return studentAns.map(idx => `${String.fromCharCode(65 + idx)}. ${q.options[idx]}`).join(', ');
+                    } else {
+                      return `${String.fromCharCode(65 + (studentAns as number))}. ${q.options[studentAns as number]}`;
+                    }
+                  };
+
+                  const getCorrectAnswerText = () => {
+                    if (q.type === 'MR') {
+                      const correctSet = q.correctAnswerIndices || [];
+                      return correctSet.map(idx => `${String.fromCharCode(65 + idx)}. ${q.options[idx]}`).join(', ');
+                    } else {
+                      const correctIdx = typeof q.correctAnswerIndex === 'number' ? q.correctAnswerIndex : (q.correctAnswerIndices?.[0] ?? 0);
+                      return `${String.fromCharCode(65 + correctIdx)}. ${q.options[correctIdx]}`;
+                    }
+                  };
 
                   return (
                     <div key={q.id} className="border-b border-slate-100 pb-6 last:border-0 last:pb-0">
@@ -232,7 +288,7 @@ export default function App() {
                         <span className={`w-6 h-6 rounded-md font-mono text-xs font-bold flex items-center justify-center shrink-0 border mt-0.5 ${
                           isCorrect
                             ? 'bg-emerald-500 border-emerald-600 text-white'
-                            : studentAnsIdx !== undefined
+                            : hasAnswered
                               ? 'bg-rose-500 border-rose-600 text-white'
                               : 'bg-slate-400 border-slate-500 text-white'
                         }`}>
@@ -240,23 +296,26 @@ export default function App() {
                         </span>
                         
                         <div className="space-y-3 flex-1">
-                          <h4 className="font-bold text-slate-800 leading-relaxed text-sm">{q.questionText}</h4>
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-bold text-slate-800 leading-relaxed text-sm flex-1">{q.questionText}</h4>
+                            <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500 font-mono">
+                              {q.type === 'MR' ? 'Pilihan Ganda 2 Jawaban (MR)' : 'Pilihan Ganda Tunggal (MC)'}
+                            </span>
+                          </div>
                           
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                             <div className="p-2.5 rounded-lg border border-slate-100 bg-slate-50">
                               <span className="text-slate-400 uppercase tracking-wide font-mono text-[9px] block mb-1">Pilihan Anda:</span>
-                              <span className={`font-semibold ${isCorrect ? 'text-emerald-700' : studentAnsIdx !== undefined ? 'text-rose-700' : 'text-slate-400'}`}>
-                                {studentAnsIdx !== undefined
-                                  ? `${String.fromCharCode(65 + studentAnsIdx)}. ${q.options[studentAnsIdx]}`
-                                  : 'Tidak dijawab'}
+                              <span className={`font-semibold ${isCorrect ? 'text-emerald-700' : hasAnswered ? 'text-rose-700' : 'text-slate-400'}`}>
+                                {getStudentAnswerText()}
                               </span>
                             </div>
-
+ 
                             {!isCorrect && (
                               <div className="p-2.5 rounded-lg border border-emerald-100 bg-emerald-50/50">
                                 <span className="text-emerald-600 uppercase tracking-wide font-mono text-[9px] block mb-1">Kunci Jawaban Benar:</span>
                                 <span className="font-semibold text-emerald-800">
-                                  {String.fromCharCode(65 + q.correctAnswerIndex)}. {q.options[q.correctAnswerIndex]}
+                                  {getCorrectAnswerText()}
                                 </span>
                               </div>
                             )}

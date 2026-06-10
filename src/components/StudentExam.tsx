@@ -7,7 +7,7 @@ interface StudentExamProps {
   questions: Question[];
   durationMinutes: number;
   onViolation: (reason: string) => void;
-  onSubmitAnswers: (answers: Record<string, number>) => void;
+  onSubmitAnswers: (answers: Record<string, number | number[]>) => void;
   onExit: () => void;
 }
 
@@ -20,7 +20,7 @@ export default function StudentExam({
   onExit
 }: StudentExamProps) {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [selectedAnswers, setSelectedAnswers] = useState<Record<string, number>>(student.answers || {});
+  const [selectedAnswers, setSelectedAnswers] = useState<Record<string, number | number[]>>(student.answers || {});
   const [fullscreenFailed, setFullscreenFailed] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [localPasscode, setLocalPasscode] = useState('');
@@ -131,7 +131,32 @@ export default function StudentExam({
   }, [student.status, onViolation]);
 
   const handleSelectOption = (questionId: string, optionIndex: number) => {
-    const updated = { ...selectedAnswers, [questionId]: optionIndex };
+    const questionObj = questions.find(q => q.id === questionId);
+    let updated;
+
+    if (questionObj?.type === 'MR') {
+      const currentSelection = Array.isArray(selectedAnswers[questionId])
+        ? (selectedAnswers[questionId] as number[])
+        : selectedAnswers[questionId] !== undefined && selectedAnswers[questionId] !== null
+          ? [selectedAnswers[questionId] as number]
+          : [];
+
+      let nextSelection;
+      if (currentSelection.includes(optionIndex)) {
+        nextSelection = currentSelection.filter(item => item !== optionIndex);
+      } else {
+        if (currentSelection.length >= 2) {
+          // Keep max 2 by replacing the oldest (index 0)
+          nextSelection = [...currentSelection.slice(1), optionIndex];
+        } else {
+          nextSelection = [...currentSelection, optionIndex];
+        }
+      }
+      updated = { ...selectedAnswers, [questionId]: nextSelection };
+    } else {
+      updated = { ...selectedAnswers, [questionId]: optionIndex };
+    }
+
     setSelectedAnswers(updated);
     // Silent background sync
     student.answers = updated;
@@ -317,9 +342,19 @@ export default function StudentExam({
                 Pertanyaan {currentQuestionIndex + 1} dari {questions.length}
               </span>
               <span className="px-2.5 py-1 bg-slate-100 text-slate-500 text-xs rounded-full font-semibold font-mono">
-                {selectedAnswers[currentQuestion.id] !== undefined ? '✓ Terjawab' : '• Belum Terjawab'}
+                {selectedAnswers[currentQuestion.id] !== undefined && 
+                 (!Array.isArray(selectedAnswers[currentQuestion.id]) || (selectedAnswers[currentQuestion.id] as number[]).length > 0)
+                  ? `✓ Terjawab${currentQuestion.type === 'MR' ? ` (${(selectedAnswers[currentQuestion.id] as number[]).length}/2)` : ''}`
+                  : '• Belum Terjawab'}
               </span>
             </div>
+
+            {currentQuestion.type === 'MR' && (
+              <div className="mb-5 p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs font-semibold text-amber-850 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-amber-500 mr-1 shrink-0 animate-ping" />
+                <span>PILIHAN GANDA 2 JAWABAN: Pilih tepat 2 (dua) opsi jawaban yang benar!</span>
+              </div>
+            )}
 
             {/* Question Text */}
             <h3 className="text-lg font-bold text-slate-800 leading-relaxed mb-8">
@@ -330,27 +365,35 @@ export default function StudentExam({
             <div className="space-y-4">
               {currentQuestion.options.map((option, idx) => {
                 const labelLetter = String.fromCharCode(65 + idx); // A, B, C, D
-                const isSelected = selectedAnswers[currentQuestion.id] === idx;
+                const qAns = selectedAnswers[currentQuestion.id];
+                const isSelected = Array.isArray(qAns) ? qAns.includes(idx) : qAns === idx;
                 
                 return (
                   <button
                     key={idx}
                     id={`btn-option-${idx}`}
                     onClick={() => handleSelectOption(currentQuestion.id, idx)}
-                    className={`w-full text-left px-5 py-4 rounded-xl border text-sm transition-all flex items-center gap-4 ${
+                    className={`w-full text-left px-5 py-4 rounded-xl border text-sm transition-all flex items-center justify-between gap-4 ${
                       isSelected
                         ? 'bg-indigo-50/70 border-indigo-500 text-indigo-900 font-semibold ring-1 ring-indigo-500'
                         : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
                     }`}
                   >
-                    <span className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold font-mono text-sm border shrink-0 ${
-                      isSelected
-                        ? 'bg-indigo-600 border-indigo-700 text-white'
-                        : 'bg-white border-slate-300 text-slate-500'
-                    }`}>
-                      {labelLetter}
-                    </span>
-                    <span className="leading-snug">{option}</span>
+                    <div className="flex items-center gap-4">
+                      <span className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold font-mono text-sm border shrink-0 ${
+                        isSelected
+                          ? 'bg-indigo-600 border-indigo-700 text-white'
+                          : 'bg-white border-slate-300 text-slate-500'
+                      }`}>
+                        {labelLetter}
+                      </span>
+                      <span className="leading-snug">{option}</span>
+                    </div>
+                    {isSelected && (
+                      <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                        ✓
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -400,7 +443,8 @@ export default function StudentExam({
           
           <div className="grid grid-cols-5 gap-2.5">
             {questions.map((q, idx) => {
-              const isAnswered = selectedAnswers[q.id] !== undefined;
+              const qAns = selectedAnswers[q.id];
+              const isAnswered = qAns !== undefined && qAns !== null && (!Array.isArray(qAns) || qAns.length > 0);
               const isCurrent = currentQuestionIndex === idx;
 
               return (

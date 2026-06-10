@@ -10,7 +10,10 @@ export const INITIAL_QUESTIONS: Question[] = [
       'Moh. Hatta',
       'Ibu Sud'
     ],
-    correctAnswerIndex: 1
+    correctAnswerIndex: 1,
+    correctAnswerIndices: [1],
+    type: 'MC',
+    score: 20
   },
   {
     id: 'q2',
@@ -21,18 +24,24 @@ export const INITIAL_QUESTIONS: Question[] = [
       'Padi dan Kapas',
       'Kepala Banteng'
     ],
-    correctAnswerIndex: 2
+    correctAnswerIndex: 2,
+    correctAnswerIndices: [2],
+    type: 'MC',
+    score: 20
   },
   {
     id: 'q3',
-    questionText: 'Planet manakah yang letaknya paling dekat dengan Matahari dalam tata surya kita?',
+    questionText: 'Manakah dari berikut ini yang merupakan planet dalam tata surya kita? (PILIH 2 JAWABAN BENAR)',
     options: [
+      'Merkurius',
+      'Andromeda',
       'Venus',
-      'Mars',
-      'Yupiter',
-      'Merkurius'
+      'Alpha Centauri'
     ],
-    correctAnswerIndex: 3
+    correctAnswerIndex: 0,
+    correctAnswerIndices: [0, 2],
+    type: 'MR',
+    score: 20
   },
   {
     id: 'q4',
@@ -43,7 +52,10 @@ export const INITIAL_QUESTIONS: Question[] = [
       'Afrika',
       'Antartika'
     ],
-    correctAnswerIndex: 1
+    correctAnswerIndex: 1,
+    correctAnswerIndices: [1],
+    type: 'MC',
+    score: 20
   },
   {
     id: 'q5',
@@ -54,7 +66,10 @@ export const INITIAL_QUESTIONS: Question[] = [
       'O',
       'C'
     ],
-    correctAnswerIndex: 2
+    correctAnswerIndex: 2,
+    correctAnswerIndices: [2],
+    type: 'MC',
+    score: 20
   }
 ];
 

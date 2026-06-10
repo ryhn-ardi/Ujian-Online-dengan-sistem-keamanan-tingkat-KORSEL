@@ -45,25 +45,27 @@ export default function AdminPanel({
 
   const handleDownloadTemplate = () => {
     const headers = [
-      'nomor',
+      'jenis_soal (MC/MR)',
       'soal',
       'opsi a',
       'opsi b',
       'opsi c',
       'opsi d',
-      'jawaban yang benar (gunakan a b c d)',
       'skor tiap soal'
     ];
     
     const sampleRows = [
-      [1, 'Siapakah presiden pertama Indonesia?', 'Ir. Soekarno', 'Moh. Hatta', 'Soeharto', 'B.J. Habibie', 'a', 10],
-      [2, 'Berapakah hasil kali dari 10 dikali 5?', '15', '50', '105', '5', 'b', 10]
+      ['MC', 'Siapakah pencipta lagu kebangsaan "Indonesia Raya"?', 'Ir. Soekarno', '*W.R. Supratman', 'Moh. Hatta', 'Ibu Sud', 20],
+      ['MR', 'Manakah yang merupakan pulau besar di Negara Indonesia? (pilih 2 jawaban)', '**Pulau Kalimantan', '**Pulau Sulawesi', 'Pulau Madura', 'Pulau Christmas', 20]
     ];
 
-    const csvContent = '\uFEFF' + [
+    const csvLines = [
+      'sep=,',
       headers.join(','),
       ...sampleRows.map(row => row.map(val => `"${val.toString().replace(/"/g, '""')}"`).join(','))
-    ].join('\n');
+    ];
+
+    const csvContent = '\uFEFF' + csvLines.join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -97,8 +99,12 @@ export default function AdminPanel({
         return;
       }
 
-      // Split lines, filter out empty rows
-      const lines = text.split(/\r?\n/).map(line => line.trim()).filter(line => line.length > 0);
+      // Split lines, filter out empty rows and lines beginning with "sep="
+      const lines = text
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => line.length > 0 && !line.toLowerCase().startsWith('sep='));
+
       if (lines.length <= 1) {
         setImportError('Format file tidak lengkap. Harap sertakan baris header dan minimal satu baris soal.');
         return;
@@ -108,7 +114,7 @@ export default function AdminPanel({
       const firstLine = lines[0];
       const separator = firstLine.includes(';') ? ';' : ',';
 
-      // Robust CSV layout parser line splitter that honors double quotes
+      // Robust CSV line parser that honors double quotes
       const parseCSVLine = (line: string, sep: string): string[] => {
         const result: string[] = [];
         let insideQuote = false;
@@ -134,6 +140,21 @@ export default function AdminPanel({
         });
       };
 
+      const parseOption = (rawOption: string) => {
+        const trimmed = rawOption.trim();
+        let isCorrect = false;
+        let cleanText = trimmed;
+        
+        if (trimmed.startsWith('**')) {
+          isCorrect = true;
+          cleanText = trimmed.substring(2).trim();
+        } else if (trimmed.startsWith('*')) {
+          isCorrect = true;
+          cleanText = trimmed.substring(1).trim();
+        }
+        return { isCorrect, text: cleanText };
+      };
+
       const importedQs: Question[] = [];
       
       // Parse questions lines, skip heading line [0]
@@ -143,27 +164,53 @@ export default function AdminPanel({
           continue;
         }
 
+        const rawType = (columns[0] || '').trim().toUpperCase();
         const soalText = columns[1];
         const optA = columns[2];
         const optB = columns[3];
         const optC = columns[4];
         const optD = columns[5];
-        const correctAnswerChar = (columns[6] || '').trim().toLowerCase();
+        const scoreValRaw = columns[6];
         
         if (!soalText || !optA || !optB || !optC || !optD) {
           continue;
         }
 
-        let correctIdx = 0;
-        if (correctAnswerChar === 'b') correctIdx = 1;
-        else if (correctAnswerChar === 'c') correctIdx = 2;
-        else if (correctAnswerChar === 'd') correctIdx = 3;
+        const parsedA = parseOption(optA);
+        const parsedB = parseOption(optB);
+        const parsedC = parseOption(optC);
+        const parsedD = parseOption(optD);
+
+        const correctIndices: number[] = [];
+        if (parsedA.isCorrect) correctIndices.push(0);
+        if (parsedB.isCorrect) correctIndices.push(1);
+        if (parsedC.isCorrect) correctIndices.push(2);
+        if (parsedD.isCorrect) correctIndices.push(3);
+
+        const cleanOptions = [parsedA.text, parsedB.text, parsedC.text, parsedD.text];
+        
+        // Decide type
+        let qType: 'MC' | 'MR' = 'MC';
+        if (rawType === 'MR') {
+          qType = 'MR';
+        }
+
+        // If no stars were provided, default first option as correct.
+        if (correctIndices.length === 0) {
+          correctIndices.push(0);
+        }
+
+        const firstCorrectIdx = correctIndices[0];
+        const qScore = Math.max(0, parseInt(scoreValRaw, 10)) || 10;
 
         importedQs.push({
           id: `q_imported_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 4)}`,
           questionText: soalText,
-          options: [optA, optB, optC, optD],
-          correctAnswerIndex: correctIdx
+          options: cleanOptions,
+          correctAnswerIndex: firstCorrectIdx,
+          correctAnswerIndices: correctIndices,
+          type: qType,
+          score: qScore
         });
       }
 
@@ -694,13 +741,26 @@ export default function AdminPanel({
                   </button>
                 </div>
 
-                <div className="p-4 bg-emerald-50/50 border border-emerald-110 border-emerald-100 rounded-xl space-y-2.5 text-xs text-slate-600">
+                <div className="p-4 bg-emerald-50/50 border border-emerald-100 rounded-xl space-y-2.5 text-xs text-slate-600">
                   <p className="font-bold text-emerald-950">Aturan Penulisan Template Excel / CSV:</p>
-                  <ol className="list-decimal list-inside space-y-1">
-                    <li>Gunakan file template Excel berformat CSV yang didownload di atas agar urutan kolomnya tepat.</li>
-                    <li>Satu baris di bawah header baris mewakili 1 butir soal.</li>
-                    <li>Kolomnya terdiri dari: <strong className="text-emerald-990 text-emerald-900 font-mono">nomor, soal, opsi a, opsi b, opsi c, opsi d, jawaban yang benar (gunakan a b c d), skor tiap soal</strong></li>
-                    <li>Jawaban yang benar **harus** ditulis menggunakan salah satu huruf: <strong className="text-emerald-900 font-mono">a, b, c, atau d</strong> (case-insensitive).</li>
+                  <ol className="list-decimal list-inside space-y-1.5">
+                    <li>Gunakan file template Excel berformat CSV yang didownload di atas agar urutan & pemisah kolom otomatis terbuka rapi di Excel.</li>
+                    <li>Satu baris setelah baris header mewakili 1 butir soal.</li>
+                    <li>Kolomnya terdiri atas 7 kolom berturut-turut:
+                      <ul className="list-disc list-inside pl-4 my-1 font-mono text-[11px] text-emerald-900 font-semibold space-y-0.5">
+                        <li>Kolom 1: Jenis soal (isi <code className="bg-emerald-100/80 px-1 rounded">MC</code> atau <code className="bg-emerald-100/80 px-1 rounded">MR</code>)</li>
+                        <li>Kolom 2: Soal (teks pertanyaan)</li>
+                        <li>Kolom 3-6: Opsi A, B, C, dan D (opsi pilihan ganda)</li>
+                        <li>Kolom 7: Skor tiap soal (berat poin nilai, cth: 20)</li>
+                      </ul>
+                    </li>
+                    <li>Untuk menandai jawaban benar, berikan tanda bintang di awal teks opsi pilihan ganda tersebut:
+                      <ul className="list-disc list-inside pl-4 my-1 text-slate-700 space-y-0.5">
+                        <li>Untuk jenis soal <strong className="text-emerald-900">MC</strong> (single-response): bubuhkan <strong className="text-emerald-950 font-mono">*</strong> (satu bintang) pada salah satu opsi yang benar (contoh: <code className="bg-slate-100 px-1 py-0.5 rounded text-indigo-700 font-mono">*W.R. Supratman</code>).</li>
+                        <li>Untuk jenis soal <strong className="text-emerald-900">MR</strong> (multiple-response 2 jawaban): bubuhkan <strong className="text-emerald-950 font-mono">**</strong> (dua bintang) di depan 2 opsi jawaban yang benar (contoh: <code className="bg-slate-100 px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">**Kalimantan</code> dan <code className="bg-slate-100 px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">**Sulawesi</code>).</li>
+                      </ul>
+                    </li>
+                    <li>Tanda bintang <code className="font-mono text-red-600 font-bold">*</code> atau <code className="font-mono text-red-600 font-bold">**</code> ini otomatis dihapus oleh sistem saat ujian dikerjakan siswa, sehingga kunci jawaban aman rahasia.</li>
                   </ol>
                 </div>
 
@@ -743,7 +803,7 @@ export default function AdminPanel({
                   <div>
                     <label className="block text-xs font-bold text-slate-500 font-mono uppercase tracking-wider mb-2">Atau Paste Teks CSV Langsung</label>
                     <textarea
-                      placeholder="nomor,soal,opsi a,opsi b,opsi c,opsi d,jawaban yang benar (gunakan a b c d),skor tiap soal&#10;1,Siapakah bapak pramuka dunia?,S Baden Powell,Ir Soekarno,Yuri Gagarin,Liem Swie King,a,10"
+                      placeholder="jenis_soal (MC/MR),soal,opsi a,opsi b,opsi c,opsi d,skor tiap soal&#10;MC,Siapakah bapak pramuka dunia?,*S Baden Powell,Ir Soekarno,Yuri Gagarin,Liem Swie King,10&#10;MR,Manakah yang termasuk pulau besar di Indonesia?,**Sumatra,**Sulawesi,Nusa Penida,Pulau Christmas,20"
                       value={importText}
                       onChange={(e) => setImportText(e.target.value)}
                       rows={5}
