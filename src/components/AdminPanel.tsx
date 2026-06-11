@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Users, FileSpreadsheet, RefreshCw, KeyRound, Edit, Trash2, Plus, Save, BookOpen, Clock, X, ChevronRight, Check, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Users, FileSpreadsheet, RefreshCw, KeyRound, Edit, Trash2, Plus, Save, BookOpen, Clock, X, ChevronRight, Check, AlertTriangle, ShieldCheck, Search } from 'lucide-react';
 import { Student, Question, ExamConfig } from '../types';
 
 interface AdminPanelProps {
@@ -24,6 +24,9 @@ export default function AdminPanel({
   // Tabs for the Admin Control Panel
   const [activeTab, setActiveTab] = useState<'MONITOR' | 'QUESTIONS' | 'CONFIG'>('MONITOR');
 
+  // Search filter query
+  const [studentSearch, setStudentSearch] = useState('');
+
   // Student editor modals state
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [editName, setEditName] = useState('');
@@ -42,6 +45,16 @@ export default function AdminPanel({
   const [importError, setImportError] = useState('');
   const [importSuccess, setImportSuccess] = useState('');
   const [showImportArea, setShowImportArea] = useState(false);
+
+  const filteredStudents = students.filter(s => {
+    const q = studentSearch.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      (s.name || '').toLowerCase().includes(q) ||
+      (s.studentClass || '').toLowerCase().includes(q) ||
+      (s.absentNumber || '').toLowerCase().includes(q)
+    );
+  });
 
   const handleDownloadTemplate = () => {
     const headers = [
@@ -94,54 +107,86 @@ export default function AdminPanel({
       setImportError('');
       setImportSuccess('');
 
-      if (!text.trim()) {
+      let cleanText = text.trim();
+      // Remove sep= lines if present
+      if (cleanText.toLowerCase().startsWith('sep=')) {
+        const newlineIdx = cleanText.indexOf('\n');
+        if (newlineIdx !== -1) {
+          cleanText = cleanText.substring(newlineIdx + 1).trim();
+        }
+      }
+
+      if (!cleanText) {
         setImportError('Teks data kosong atau tidak terbaca.');
         return;
       }
 
-      // Split lines, filter out empty rows and lines beginning with "sep="
-      const lines = text
-        .split(/\r?\n/)
-        .map(line => line.trim())
-        .filter(line => line.length > 0 && !line.toLowerCase().startsWith('sep='));
+      // Determine separator (comma or semicolon) from the first line of cleanText
+      const firstLineEnd = cleanText.indexOf('\n');
+      const firstLine = firstLineEnd !== -1 ? cleanText.substring(0, firstLineEnd) : cleanText;
+      const separator = firstLine.includes(';') ? ';' : ',';
 
-      if (lines.length <= 1) {
+      // Robust CSV parser that handles quotes, nested newlines, and double quotes
+      const parseCSV = (csvText: string, sep: string): string[][] => {
+        const rows: string[][] = [];
+        let currentRow: string[] = [];
+        let entry = '';
+        let insideQuote = false;
+        
+        let i = 0;
+        while (i < csvText.length) {
+          const char = csvText[i];
+          const nextChar = csvText[i + 1];
+          
+          if (char === '"') {
+            if (insideQuote && nextChar === '"') {
+              entry += '"';
+              i += 2;
+              continue;
+            }
+            insideQuote = !insideQuote;
+            i++;
+          } else if (char === sep && !insideQuote) {
+            currentRow.push(entry.trim());
+            entry = '';
+            i++;
+          } else if ((char === '\r' || char === '\n') && !insideQuote) {
+            currentRow.push(entry.trim());
+            entry = '';
+            if (currentRow.length > 0 && !(currentRow.length === 1 && currentRow[0] === '')) {
+              rows.push(currentRow);
+            }
+            currentRow = [];
+            if (char === '\r' && nextChar === '\n') {
+              i += 2;
+            } else {
+              i++;
+            }
+          } else {
+            entry += char;
+            i++;
+          }
+        }
+        
+        if (entry || currentRow.length > 0) {
+          currentRow.push(entry.trim());
+          if (currentRow.length > 0 && !(currentRow.length === 1 && currentRow[0] === '')) {
+            rows.push(currentRow);
+          }
+        }
+        
+        return rows;
+      };
+
+      const parsedRows = parseCSV(cleanText, separator);
+
+      if (parsedRows.length <= 1) {
         setImportError('Format file tidak lengkap. Harap sertakan baris header dan minimal satu baris soal.');
         return;
       }
 
-      // Determine separator (comma or semicolon)
-      const firstLine = lines[0];
-      const separator = firstLine.includes(';') ? ';' : ',';
-
-      // Robust CSV line parser that honors double quotes
-      const parseCSVLine = (line: string, sep: string): string[] => {
-        const result: string[] = [];
-        let insideQuote = false;
-        let entry = '';
-        for (let i = 0; i < line.length; i++) {
-          const char = line[i];
-          if (char === '"') {
-            insideQuote = !insideQuote;
-          } else if (char === sep && !insideQuote) {
-            result.push(entry.trim());
-            entry = '';
-          } else {
-            entry += char;
-          }
-        }
-        result.push(entry.trim());
-        return result.map(v => {
-          let clean = v;
-          if (clean.startsWith('"') && clean.endsWith('"')) {
-            clean = clean.slice(1, -1);
-          }
-          return clean.replace(/""/g, '"');
-        });
-      };
-
       const parseOption = (rawOption: string) => {
-        const trimmed = rawOption.trim();
+        const trimmed = (rawOption || '').trim();
         let isCorrect = false;
         let cleanText = trimmed;
         
@@ -158,9 +203,10 @@ export default function AdminPanel({
       const importedQs: Question[] = [];
       
       // Parse questions lines, skip heading line [0]
-      for (let i = 1; i < lines.length; i++) {
-        const columns = parseCSVLine(lines[i], separator);
-        if (columns.length < 7) {
+      for (let i = 1; i < parsedRows.length; i++) {
+        const columns = parsedRows[i];
+        // Score (columns[6]) is optional, meaning columns can have 6 fields
+        if (columns.length < 6) {
           continue;
         }
 
@@ -201,7 +247,7 @@ export default function AdminPanel({
         }
 
         const firstCorrectIdx = correctIndices[0];
-        const qScore = Math.max(0, parseInt(scoreValRaw, 10)) || 10;
+        const qScore = scoreValRaw ? (Math.max(0, parseInt(scoreValRaw, 10)) || 10) : 10;
 
         importedQs.push({
           id: `q_imported_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 4)}`,
@@ -242,7 +288,8 @@ export default function AdminPanel({
         return {
           ...s,
           status: 'SEDANG_MENGERJAKAN' as const,
-          lockedReason: undefined
+          lockedReason: undefined,
+          answers: {}
         };
       }
       return s;
@@ -532,9 +579,32 @@ export default function AdminPanel({
 
             {/* Students Table */}
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
-              <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-                <h3 className="font-bold text-slate-800">Daftar Kehadiran & Nilai Siswa</h3>
-                <span className="text-xs text-slate-400 italic">Nilai otomatis dikalkulasi real-time saat siswa klik kumpul atau waktu habis</span>
+              <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h3 className="font-bold text-slate-800">Daftar Kehadiran & Nilai Siswa</h3>
+                  <span className="text-xs text-slate-400 italic">Nilai otomatis dikalkulasi real-time saat siswa klik kumpul atau waktu habis</span>
+                </div>
+                {/* Search Bar Input */}
+                <div className="relative shrink-0 w-full sm:w-72">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                    <Search className="w-4 h-4" />
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Cari nama, kelas, atau absen siswa..."
+                    value={studentSearch}
+                    onChange={(e) => setStudentSearch(e.target.value)}
+                    className="w-full pl-9 pr-8 py-2 border border-slate-200 bg-white rounded-xl text-xs text-slate-700 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                  />
+                  {studentSearch && (
+                    <button
+                      onClick={() => setStudentSearch('')}
+                      className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-405 hover:text-slate-600 font-bold text-sm"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
               </div>
 
               {students.length === 0 ? (
@@ -544,6 +614,14 @@ export default function AdminPanel({
                   </div>
                   <h4 className="font-bold text-slate-700">Belum ada siswa yang mendaftar</h4>
                   <p className="text-xs text-slate-400 mt-1">Siswa akan muncul di sini secara real-time setelah mereka menginput nama di lembar depan ujian.</p>
+                </div>
+              ) : filteredStudents.length === 0 ? (
+                <div className="text-center py-16 px-4">
+                  <div className="inline-flex p-3 bg-indigo-50 rounded-full text-indigo-500 mb-2 animate-pulse">
+                    <Search className="w-8 h-8" />
+                  </div>
+                  <h4 className="font-bold text-slate-700">Hasil pencarian tidak ditemukan</h4>
+                  <p className="text-xs text-slate-400 mt-1">Tidak ada nama, kelas, atau absen siswa yang cocok dengan kata kunci "{studentSearch}".</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -561,7 +639,7 @@ export default function AdminPanel({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {students.map((s) => {
+                      {filteredStudents.map((s) => {
                         const scoreBg = s.score !== undefined && s.score >= 70 ? 'bg-green-100 text-green-800' : 'bg-rose-100 text-rose-800';
                         
                         return (

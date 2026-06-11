@@ -8,6 +8,7 @@ interface StudentExamProps {
   durationMinutes: number;
   onViolation: (reason: string) => void;
   onSubmitAnswers: (answers: Record<string, number | number[]>) => void;
+  onStartExam: () => void;
   onExit: () => void;
 }
 
@@ -17,6 +18,7 @@ export default function StudentExam({
   durationMinutes,
   onViolation,
   onSubmitAnswers,
+  onStartExam,
   onExit
 }: StudentExamProps) {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -178,7 +180,7 @@ export default function StudentExam({
   };
 
   const handleUnlockWithCode = () => {
-    if (localPasscode === '123456') {
+    if (localPasscode === 'monyetkukus') {
       setLocalPasscode('');
       setLocalPasscodeError('');
       // Force request fullscreen and unlock
@@ -272,7 +274,10 @@ export default function StudentExam({
           <div className="space-y-3">
             <button
               id="btn-trigger-fullscreen-start"
-              onClick={requestFullscreen}
+              onClick={async () => {
+                await requestFullscreen();
+                onStartExam();
+              }}
               className="w-full bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold py-3.5 px-6 rounded-xl transition duration-200 flex items-center justify-center gap-2 shadow-lg"
             >
               Masukkan Layar Penuh & Mulai

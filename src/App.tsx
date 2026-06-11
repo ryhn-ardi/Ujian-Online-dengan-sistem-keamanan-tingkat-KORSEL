@@ -73,6 +73,24 @@ export default function App() {
     setRole('STUDENT_EXAM');
   };
 
+  // 3b. STUDENT FLOW: Start Exam Action
+  const handleStartExam = () => {
+    const freshStudents = getStudents();
+    const updated = freshStudents.map((s) => {
+      if (s.id === currentStudentId) {
+        return {
+          ...s,
+          status: 'SEDANG_MENGERJAKAN' as const,
+          startTime: new Date().toISOString(),
+          endTime: new Date(Date.now() + config.durationMinutes * 60 * 1000).toISOString(),
+          lastActive: new Date().toISOString()
+        };
+      }
+      return s;
+    });
+    handleUpdateStudents(updated);
+  };
+
   // 4. STUDENT FLOW: Violation detection (Strict lock trigger)
   const handleStudentViolation = (reason: string) => {
     const freshStudents = getStudents(); // pull fresh to preserve parallel answers
@@ -93,6 +111,7 @@ export default function App() {
           status: 'TERKUNCI' as const,
           lockedReason: reason,
           violationCount: (s.violationCount || 0) + 1,
+          answers: {},
           lastActive: new Date().toISOString()
         };
       }
@@ -193,6 +212,7 @@ export default function App() {
           questions={questions}
           durationMinutes={config.durationMinutes}
           onViolation={handleStudentViolation}
+          onStartExam={handleStartExam}
           onSubmitAnswers={handleStudentSubmit}
           onExit={() => {
             // Delete incomplete record & exit
