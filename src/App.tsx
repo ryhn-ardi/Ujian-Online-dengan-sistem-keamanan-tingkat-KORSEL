@@ -54,7 +54,7 @@ export default function App() {
   };
 
   // 3. STUDENT FLOW: Registration Action
-  const handleRegisterStudent = (data: { name: string; absentNumber: string; studentClass: string }) => {
+  const handleRegisterStudent = (data: { name: string; absentNumber: string; studentClass: string; subjectId: string }) => {
     const existingStudents = getStudents();
     
     // Create new student session object
@@ -67,7 +67,8 @@ export default function App() {
       status: 'BELUM_MULAI',
       violationCount: 0,
       answers: {},
-      lastActive: new Date().toISOString()
+      lastActive: new Date().toISOString(),
+      subjectId: data.subjectId
     };
 
     const updated = [...existingStudents, newStudent];
@@ -260,6 +261,8 @@ export default function App() {
           examTitle={config.examTitle || 'Ujian Digital'}
           durationMinutes={config.durationMinutes}
           totalQuestions={questions.length}
+          subject1Name={config.subject1Name}
+          subject2Name={config.subject2Name}
         />
       )}
 
@@ -267,7 +270,7 @@ export default function App() {
       {role === 'STUDENT_EXAM' && activeStudent && (
         <StudentExam
           student={activeStudent}
-          questions={questions}
+          questions={questions.filter(q => (!q.subjectId && (!activeStudent.subjectId || activeStudent.subjectId === 'sub1')) || q.subjectId === activeStudent.subjectId)}
           durationMinutes={config.durationMinutes}
           onViolation={handleStudentViolation}
           onStartExam={handleStartExam}
@@ -325,8 +328,10 @@ export default function App() {
               </h2>
 
               <div className="space-y-6">
-                {questions.map((q, qIndex) => {
-                  const studentAns = activeStudent.answers[q.id];
+                {questions
+                  .filter(q => (!q.subjectId && (!activeStudent.subjectId || activeStudent.subjectId === 'sub1')) || q.subjectId === activeStudent.subjectId)
+                  .map((q, qIndex) => {
+                    const studentAns = activeStudent.answers[q.id];
                   const hasAnswered = studentAns !== undefined && studentAns !== null && (!Array.isArray(studentAns) || studentAns.length > 0);
                   
                   let isCorrect = false;

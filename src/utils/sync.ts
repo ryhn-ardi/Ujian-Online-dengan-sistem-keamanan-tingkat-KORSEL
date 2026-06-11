@@ -29,7 +29,12 @@ try {
 // 1. Clean in-memory states populated dynamically directly from Live Firestore docs
 let localStudents: Student[] = [];
 let localQuestions: Question[] = [];
-let localConfig: ExamConfig = { durationMinutes: 15, examTitle: '' };
+let localConfig: ExamConfig = {
+  durationMinutes: 15,
+  examTitle: '',
+  subject1Name: 'Seni Budaya dan P kelas 8',
+  subject2Name: 'Informatika kelas 7'
+};
 
 const initialSyncCompleted = {
   config: false,
@@ -139,12 +144,24 @@ onSnapshot(
   async (snapshot) => {
     if (snapshot.exists()) {
       const data = snapshot.data() as ExamConfig;
+      let needUpgrade = false;
       if (data.examTitle === 'Ujian Tengah Semester - Pengetahuan Umum') {
         data.examTitle = 'ujian berbasis keamanan tingkat korea utara + NASA';
+        needUpgrade = true;
+      }
+      if (!data.subject1Name || data.subject1Name === 'Matematika & Sains (IPA)') {
+        data.subject1Name = 'Seni Budaya dan P kelas 8';
+        needUpgrade = true;
+      }
+      if (!data.subject2Name || data.subject2Name === 'IPS & Pengetahuan Umum') {
+        data.subject2Name = 'Informatika kelas 7';
+        needUpgrade = true;
+      }
+      if (needUpgrade) {
         try {
           await setDoc(doc(db, 'config', 'examConfig'), data);
         } catch (err) {
-          console.warn('Failed to auto-upgrade examTitle in database:', err);
+          console.warn('Failed to auto-upgrade configuration in database:', err);
         }
       }
       localConfig = data;

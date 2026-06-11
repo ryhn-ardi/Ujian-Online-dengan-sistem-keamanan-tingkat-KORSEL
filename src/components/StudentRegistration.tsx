@@ -4,11 +4,13 @@ import { Student } from '../types';
 
 interface StudentRegistrationProps {
   students: Student[];
-  onRegister: (data: { name: string; absentNumber: string; studentClass: string }) => void;
+  onRegister: (data: { name: string; absentNumber: string; studentClass: string; subjectId: string }) => void;
   onAdminLogin: () => void;
   examTitle: string;
   durationMinutes: number;
   totalQuestions: number;
+  subject1Name?: string;
+  subject2Name?: string;
 }
 
 export default function StudentRegistration({
@@ -17,11 +19,14 @@ export default function StudentRegistration({
   onAdminLogin,
   examTitle,
   durationMinutes,
-  totalQuestions
+  totalQuestions,
+  subject1Name,
+  subject2Name
 }: StudentRegistrationProps) {
   const [name, setName] = useState('');
   const [absentNumber, setAbsentNumber] = useState('');
   const [studentClass, setStudentClass] = useState('');
+  const [subjectId, setSubjectId] = useState('sub1');
   const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState('');
 
@@ -55,7 +60,8 @@ export default function StudentRegistration({
     onRegister({
       name: name.trim(),
       absentNumber: absentNumber.trim(),
-      studentClass: studentClass.trim().toUpperCase()
+      studentClass: studentClass.trim().toUpperCase(),
+      subjectId
     });
   };
 
@@ -177,6 +183,41 @@ export default function StudentRegistration({
                   onChange={(e) => setStudentClass(e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl text-slate-800 focus:outline-none transition duration-200"
                 />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-slate-500 uppercase font-mono tracking-wider mb-2">Pilih Naskah Ujian (Mata Pelajaran)</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setSubjectId('sub1')}
+                    className={`flex flex-col items-start p-4 rounded-xl border text-left transition-all duration-200 cursor-pointer ${
+                      subjectId === 'sub1'
+                        ? 'border-indigo-600 bg-indigo-50/50 ring-2 ring-indigo-500/20'
+                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 bg-white'
+                    }`}
+                  >
+                    <span className={`text-[10px] font-bold uppercase font-mono tracking-wider mb-1 ${
+                      subjectId === 'sub1' ? 'text-indigo-600' : 'text-slate-400'
+                    }`}>Naskah Paket A</span>
+                    <span className="font-bold text-sm text-slate-800">{subject1Name || 'Matematika & Sains (IPA)'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSubjectId('sub2')}
+                    className={`flex flex-col items-start p-4 rounded-xl border text-left transition-all duration-200 cursor-pointer ${
+                      subjectId === 'sub2'
+                        ? 'border-indigo-600 bg-indigo-50/50 ring-2 ring-indigo-500/20'
+                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 bg-white'
+                    }`}
+                  >
+                    <span className={`text-[10px] font-bold uppercase font-mono tracking-wider mb-1 ${
+                      subjectId === 'sub2' ? 'text-indigo-600' : 'text-slate-400'
+                    }`}>Naskah Paket B</span>
+                    <span className="font-bold text-sm text-slate-800">{subject2Name || 'IPS & Pengetahuan Umum'}</span>
+                  </button>
+                </div>
               </div>
             </div>
 

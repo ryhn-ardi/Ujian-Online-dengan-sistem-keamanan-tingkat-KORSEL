@@ -6,6 +6,7 @@ export interface Question {
   correctAnswerIndices?: number[]; // List of correct indices, used for MR (multiple response)
   type?: 'MC' | 'MR'; // 'MC' = Multiple Choice (single), 'MR' = Multiple Response (2 correct answers)
   score?: number; // Custom score for each question
+  subjectId?: string; // ID of the subject this question belongs to (e.g. 'sub1' or 'sub2')
 }
 
 export type StudentStatus = 'BELUM_MULAI' | 'SEDANG_MENGERJAKAN' | 'TERKUNCI' | 'SELESAI';
@@ -25,9 +26,12 @@ export interface Student {
   startTime?: string;
   endTime?: string;
   lastActive?: string;
+  subjectId?: string; // Selected subject ID ('sub1' or 'sub2')
 }
 
 export interface ExamConfig {
   durationMinutes: number;
   examTitle: string;
+  subject1Name?: string; // Display name for Subject 1
+  subject2Name?: string; // Display name for Subject 2
 }

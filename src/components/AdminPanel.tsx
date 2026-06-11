@@ -39,6 +39,8 @@ export default function AdminPanel({
   const [qText, setQText] = useState('');
   const [qOptions, setQOptions] = useState<string[]>(['', '', '', '']);
   const [qCorrect, setQCorrect] = useState<number>(0);
+  const [qSubjectId, setQSubjectId] = useState<string>('sub1');
+  const [questionFilterSubject, setQuestionFilterSubject] = useState<string>('all');
 
   // States for CSV/Excel Question Import
   const [importText, setImportText] = useState('');
@@ -64,12 +66,13 @@ export default function AdminPanel({
       'opsi b',
       'opsi c',
       'opsi d',
-      'skor tiap soal'
+      'skor tiap soal',
+      'kode_naskah (sub1/sub2)'
     ];
     
     const sampleRows = [
-      ['MC', 'Siapakah pencipta lagu kebangsaan "Indonesia Raya"?', 'Ir. Soekarno', '*W.R. Supratman', 'Moh. Hatta', 'Ibu Sud', 20],
-      ['MR', 'Manakah yang merupakan pulau besar di Negara Indonesia? (pilih 2 jawaban)', '**Pulau Kalimantan', '**Pulau Sulawesi', 'Pulau Madura', 'Pulau Christmas', 20]
+      ['MC', 'Siapakah pencipta lagu kebangsaan "Indonesia Raya"?', 'Ir. Soekarno', '*W.R. Supratman', 'Moh. Hatta', 'Ibu Sud', 20, 'sub1'],
+      ['MR', 'Manakah yang merupakan pulau besar di Negara Indonesia? (pilih 2 jawaban)', '**Pulau Kalimantan', '**Pulau Sulawesi', 'Pulau Madura', 'Pulau Christmas', 20, 'sub2']
     ];
 
     const csvLines = [
@@ -249,6 +252,12 @@ export default function AdminPanel({
         const firstCorrectIdx = correctIndices[0];
         const qScore = scoreValRaw ? (Math.max(0, parseInt(scoreValRaw, 10)) || 10) : 10;
 
+        const rawSubject = columns[7] ? (columns[7] || '').trim().toLowerCase() : '';
+        let targetSubjectId = 'sub1';
+        if (rawSubject === 'sub2' || rawSubject === 'b' || rawSubject.includes('dua') || rawSubject === '2') {
+          targetSubjectId = 'sub2';
+        }
+
         importedQs.push({
           id: `q_imported_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 4)}`,
           questionText: soalText,
@@ -256,7 +265,8 @@ export default function AdminPanel({
           correctAnswerIndex: firstCorrectIdx,
           correctAnswerIndices: correctIndices,
           type: qType,
-          score: qScore
+          score: qScore,
+          subjectId: targetSubjectId
         });
       }
 
@@ -372,6 +382,7 @@ export default function AdminPanel({
       'Nama Siswa',
       'No Absen',
       'Kelas',
+      'Naskah Soal',
       'Status Ujian',
       'Pelanggaran Proktor (Lock Count)',
       'Total Benar',
@@ -383,7 +394,7 @@ export default function AdminPanel({
 
     const rows = students.map((s, idx) => {
       const correctCount = s.correctAnswersCount !== undefined ? s.correctAnswersCount : '-';
-      const totalCount = s.totalQuestions !== undefined ? s.totalQuestions : questions.length;
+      const totalCount = s.totalQuestions !== undefined ? s.totalQuestions : questions.filter(q => (!q.subjectId && (!s.subjectId || s.subjectId === 'sub1')) || q.subjectId === s.subjectId).length;
       const finalScore = s.score !== undefined ? s.score.toFixed(1) : '-';
       
       const formatTimeText = (isoStr?: string) => {
@@ -392,11 +403,14 @@ export default function AdminPanel({
         return `${d.toLocaleDateString('id-ID')} ${d.toLocaleTimeString('id-ID')}`;
       };
 
+      const subjectName = s.subjectId === 'sub2' ? (config.subject2Name || 'IPS & Pengetahuan Umum') : (config.subject1Name || 'Matematika & Sains (IPA)');
+
       return [
         idx + 1,
         s.name,
         s.absentNumber,
         s.studentClass,
+        subjectName,
         s.status === 'TERKUNCI' ? 'TERKOMPROMISI / TERKUNCI' : s.status,
         s.violationCount,
         correctCount,
@@ -437,7 +451,11 @@ export default function AdminPanel({
         id: `q_generated_${Date.now()}`,
         questionText: qText.trim(),
         options: qOptions.map(o => o.trim()),
-        correctAnswerIndex: qCorrect
+        correctAnswerIndex: qCorrect,
+        correctAnswerIndices: [qCorrect],
+        type: 'MC',
+        score: 20,
+        subjectId: qSubjectId
       };
       onUpdateQuestions([...questions, newQ]);
     } else if (editingQuestion) {
@@ -447,7 +465,9 @@ export default function AdminPanel({
             ...q,
             questionText: qText.trim(),
             options: qOptions.map(o => o.trim()),
-            correctAnswerIndex: qCorrect
+            correctAnswerIndex: qCorrect,
+            correctAnswerIndices: q.correctAnswerIndices || [qCorrect],
+            subjectId: qSubjectId
           };
         }
         return q;
@@ -663,7 +683,14 @@ export default function AdminPanel({
                             </td>
                             <td className="px-6 py-4 font-semibold text-slate-800">
                               <div>{s.name}</div>
-                              <div className="text-[10px] text-slate-400 font-mono mt-0.5 uppercase">ID: {s.id.slice(0, 8)}</div>
+                              <div className="text-[10px] text-slate-400 font-mono mt-0.5 uppercase flex flex-col gap-0.5">
+                                <span>ID: {s.id.slice(0, 8)}</span>
+                                <span className={`font-bold mt-1 inline-block text-[9px] px-1.5 py-0.5 rounded-md text-center max-w-fit ${
+                                  s.subjectId === 'sub2' ? 'bg-amber-100/80 text-amber-800' : 'bg-indigo-100/80 text-indigo-800'
+                                }`}>
+                                  Naskah: {s.subjectId === 'sub2' ? (config.subject2Name || 'IPS & Umum') : (config.subject1Name || 'Matematika & IPA')}
+                                </span>
+                              </div>
                             </td>
                             <td className="px-6 py-4 font-semibold text-slate-600 font-mono">
                               {s.studentClass}
@@ -696,7 +723,7 @@ export default function AdminPanel({
                               </span>
                             </td>
                             <td className="px-6 py-4 font-mono text-xs text-slate-400">
-                              {s.answers ? `${Object.keys(s.answers).length}/${questions.length}` : '0'}
+                              {s.answers ? `${Object.keys(s.answers).length}/${questions.filter(q => (!q.subjectId && (!s.subjectId || s.subjectId === 'sub1')) || q.subjectId === s.subjectId).length}` : '0'}
                             </td>
                             <td className="px-6 py-4 font-bold">
                               {s.score !== undefined ? (
@@ -769,7 +796,7 @@ export default function AdminPanel({
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200">
               <div>
                 <h3 className="font-extrabold text-slate-800 text-lg">Kelola Bank Soal Ujian</h3>
-                <p className="text-xs text-slate-505 text-slate-500 mt-1">
+                <p className="text-xs text-slate-550 text-slate-500 mt-1">
                   Perubahan bank soal bersifat instan demi fleksibilitas ujian proktor. Anda juga dapat melakukan import soal massal sekaligus via format Excel / CSV.
                 </p>
               </div>
@@ -777,7 +804,7 @@ export default function AdminPanel({
                 <button
                   id="btn-download-excel-template"
                   onClick={handleDownloadTemplate}
-                  className="px-4 py-2.5 bg-slate-105 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm rounded-xl transition flex items-center justify-center gap-1.5"
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm rounded-xl transition flex items-center justify-center gap-1.5"
                   title="Unduh file template Excel CSV untuk diisi"
                 >
                   <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
@@ -807,12 +834,55 @@ export default function AdminPanel({
                     setQText('');
                     setQOptions(['', '', '', '']);
                     setQCorrect(0);
+                    setQSubjectId('sub1');
                     setShowImportArea(false);
                   }}
-                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-505 hover:bg-indigo-500 text-white font-bold text-sm rounded-xl transition flex items-center justify-center gap-1.5 self-start sm:self-auto shadow-sm"
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm rounded-xl transition flex items-center justify-center gap-1.5 self-start sm:self-auto shadow-sm"
                 >
                   <Plus className="w-4 h-4" />
                   Tambah Soal Baru
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="bg-white px-6 py-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <span className="text-xs font-bold font-mono text-slate-500 uppercase tracking-widest">
+                Filter Naskah Ujian (Mata Pelajaran):
+              </span>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setQuestionFilterSubject('all')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
+                    questionFilterSubject === 'all'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  Semua ({questions.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQuestionFilterSubject('sub1')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
+                    questionFilterSubject === 'sub1'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  Paket A: {config.subject1Name || 'IPA'} ({questions.filter(q => !q.subjectId || q.subjectId === 'sub1').length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQuestionFilterSubject('sub2')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
+                    questionFilterSubject === 'sub2'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  Paket B: {config.subject2Name || 'IPS'} ({questions.filter(q => q.subjectId === 'sub2').length})
                 </button>
               </div>
             </div>
@@ -969,6 +1039,18 @@ export default function AdminPanel({
 
                 <form onSubmit={handleSaveQuestion} className="space-y-5">
                   <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase font-mono tracking-wider mb-2">Pilih Naskah Ujian (Mata Pelajaran)</label>
+                    <select
+                      value={qSubjectId}
+                      onChange={(e) => setQSubjectId(e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl text-slate-800 text-sm focus:outline-none transition font-semibold"
+                    >
+                      <option value="sub1">Paket A: {config.subject1Name || 'Matematika & Sains (IPA)'}</option>
+                      <option value="sub2">Paket B: {config.subject2Name || 'IPS & Pengetahuan Umum'}</option>
+                    </select>
+                  </div>
+
+                  <div>
                     <label className="block text-xs font-semibold text-slate-500 uppercase font-mono tracking-wider mb-2">Teks Soal / Pertanyaan</label>
                     <textarea
                       required
@@ -1044,69 +1126,90 @@ export default function AdminPanel({
 
             {/* List of existing questions and answers key */}
             <div className="space-y-4">
-              {questions.map((q, idx) => (
-                <div key={q.id} className="bg-white border border-slate-200 rounded-2xl p-6 relative hover:shadow-xs transition">
-                  <div className="flex items-start justify-between gap-4 mb-4">
-                    <div>
-                      <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded font-mono font-semibold text-slate-500">
-                        SOAL #{idx + 1}
-                      </span>
-                      <h4 className="font-bold text-slate-800 text-base mt-2 leading-relaxed">{q.questionText}</h4>
-                    </div>
-                    <div className="flex gap-1">
-                      <button
-                        id={`btn-edit-q-${q.id}`}
-                        onClick={() => {
-                          setEditingQuestion(q);
-                          setIsCreatingQuestion(false);
-                          setQText(q.questionText);
-                          setQOptions(q.options);
-                          setQCorrect(q.correctAnswerIndex);
-                        }}
-                        className="p-1 px-2 hover:bg-slate-100 text-slate-500 hover:text-indigo-600 rounded-md transition"
-                        title="Edit Soal"
-                      >
-                        <Edit className="w-3.5 h-3.5 inline" />
-                      </button>
-                      <button
-                        id={`btn-delete-q-${q.id}`}
-                        onClick={() => handleDeleteQuestion(q.id)}
-                        className="p-1 px-2 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-md transition"
-                        title="Hapus Soal"
-                      >
-                        <Trash2 className="w-3.5 h-3.5 inline" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4 pt-4 border-t border-slate-50 text-xs">
-                    {q.options.map((opt, oIdx) => {
-                      const optLetter = String.fromCharCode(65 + oIdx);
-                      const isCorrect = q.correctAnswerIndex === oIdx;
-
-                      return (
-                        <div
-                          key={oIdx}
-                          className={`p-2.5 rounded-lg flex items-center gap-2 border ${
-                            isCorrect
-                              ? 'bg-emerald-50 border-emerald-250 text-emerald-800 font-semibold'
-                              : 'bg-slate-50 border-transparent text-slate-500'
-                          }`}
-                        >
-                          <span className={`w-5 h-5 rounded font-bold font-mono text-[11px] flex items-center justify-center shrink-0 border ${
-                            isCorrect
-                              ? 'bg-emerald-500 border-emerald-600 text-white'
-                              : 'bg-white border-slate-200 text-slate-400'
-                          }`}>
-                            {optLetter}
-                          </span>
-                          <span className="truncate">{opt}</span>
+              {questions
+                .filter((q) => {
+                  if (questionFilterSubject === 'all') return true;
+                  if (questionFilterSubject === 'sub1') return !q.subjectId || q.subjectId === 'sub1';
+                  return q.subjectId === 'sub2';
+                })
+                .map((q, idx) => {
+                  const isSubject2 = q.subjectId === 'sub2';
+                  const subjectLabel = isSubject2
+                    ? (config.subject2Name || 'IPS & Pengetahuan Umum')
+                    : (config.subject1Name || 'Matematika & Sains (IPA)');
+                  
+                  return (
+                    <div key={q.id} className="bg-white border border-slate-200 rounded-2xl p-6 relative hover:shadow-xs transition">
+                      <div className="flex items-start justify-between gap-4 mb-4">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded font-mono font-semibold text-slate-500">
+                              SOAL #{idx + 1}
+                            </span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold font-mono uppercase ${
+                              isSubject2 ? 'bg-amber-100/80 text-amber-800' : 'bg-indigo-100/80 text-indigo-800'
+                            }`}>
+                              {subjectLabel}
+                            </span>
+                          </div>
+                          <h4 className="font-bold text-slate-800 text-base mt-2 leading-relaxed">{q.questionText}</h4>
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
+                        <div className="flex gap-1">
+                          <button
+                            id={`btn-edit-q-${q.id}`}
+                            onClick={() => {
+                              setEditingQuestion(q);
+                              setIsCreatingQuestion(false);
+                              setQText(q.questionText);
+                              setQOptions(q.options);
+                              setQCorrect(q.correctAnswerIndex);
+                              setQSubjectId(q.subjectId || 'sub1');
+                            }}
+                            className="p-1 px-2 hover:bg-slate-100 text-slate-500 hover:text-indigo-600 rounded-md transition"
+                            title="Edit Soal"
+                          >
+                            <Edit className="w-3.5 h-3.5 inline" />
+                          </button>
+                          <button
+                            id={`btn-delete-q-${q.id}`}
+                            onClick={() => handleDeleteQuestion(q.id)}
+                            className="p-1 px-2 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-md transition"
+                            title="Hapus Soal"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 inline" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4 pt-4 border-t border-slate-50 text-xs">
+                        {q.options.map((opt, oIdx) => {
+                          const optLetter = String.fromCharCode(65 + oIdx);
+                          const isCorrect = q.correctAnswerIndex === oIdx;
+
+                          return (
+                            <div
+                              key={oIdx}
+                              className={`p-2.5 rounded-lg flex items-center gap-2 border ${
+                                isCorrect
+                                  ? 'bg-emerald-50 border-emerald-250 text-emerald-800 font-semibold'
+                                  : 'bg-slate-50 border-transparent text-slate-500'
+                              }`}
+                            >
+                              <span className={`w-5 h-5 rounded font-bold font-mono text-[11px] flex items-center justify-center shrink-0 border ${
+                                isCorrect
+                                  ? 'bg-emerald-500 border-emerald-600 text-white'
+                                  : 'bg-white border-slate-200 text-slate-400'
+                              }`}>
+                                {optLetter}
+                              </span>
+                              <span className="truncate">{opt}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
           </div>
         )}
@@ -1134,6 +1237,28 @@ export default function AdminPanel({
                   value={config.examTitle}
                   onChange={(e) => onUpdateConfig({ ...config, examTitle: e.target.value })}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl text-slate-800 text-sm focus:outline-none transition"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 font-mono tracking-wider uppercase mb-2">Nama Naskah Paket A (Mata Pelajaran 1)</label>
+                <input
+                  type="text"
+                  required
+                  value={config.subject1Name || 'Matematika & Sains (IPA)'}
+                  onChange={(e) => onUpdateConfig({ ...config, subject1Name: e.target.value })}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl text-slate-800 text-sm focus:outline-none transition font-semibold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 font-mono tracking-wider uppercase mb-2">Nama Naskah Paket B (Mata Pelajaran 2)</label>
+                <input
+                  type="text"
+                  required
+                  value={config.subject2Name || 'IPS & Pengetahuan Umum'}
+                  onChange={(e) => onUpdateConfig({ ...config, subject2Name: e.target.value })}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl text-slate-800 text-sm focus:outline-none transition font-semibold"
                 />
               </div>
 
