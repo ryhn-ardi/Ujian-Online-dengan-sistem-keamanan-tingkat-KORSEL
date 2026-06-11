@@ -1,91 +1,281 @@
 import { Student, Question, ExamConfig } from '../types';
 import { INITIAL_QUESTIONS, INITIAL_CONFIG } from '../data';
+import {
+  collection,
+  doc,
+  setDoc,
+  deleteDoc,
+  onSnapshot,
+  getDocs,
+  writeBatch,
+  doc as fsDoc,
+  getDocFromServer
+} from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 const STUDENTS_KEY = 'proktor_students';
 const QUESTIONS_KEY = 'proktor_questions';
 const CONFIG_KEY = 'proktor_config';
-const SYNC_CHANNEL_NAME = 'proktor_sync_channel';
 
-// Initialize a BroadcastChannel for secure real-time sync between browser tabs
-let syncChannel: BroadcastChannel | null = null;
-try {
-  syncChannel = new BroadcastChannel(SYNC_CHANNEL_NAME);
-} catch (e) {
-  console.warn('BroadcastChannel is not supported or accessible in this iframe environment.', e);
-}
-
-// Helpers for Students
-export function getStudents(): Student[] {
+// 1. InMemory/LocalStorage fallback cache loaded instantly on boot
+let localStudents: Student[] = (() => {
   const data = localStorage.getItem(STUDENTS_KEY);
   return data ? JSON.parse(data) : [];
-}
+})();
 
-export function saveStudents(students: Student[], broadcast = true): void {
-  localStorage.setItem(STUDENTS_KEY, JSON.stringify(students));
-  if (broadcast && syncChannel) {
-    syncChannel.postMessage({ type: 'SYNC_STUDENTS' });
-  }
-}
-
-// Helpers for Questions
-export function getQuestions(): Question[] {
+let localQuestions: Question[] = (() => {
   const data = localStorage.getItem(QUESTIONS_KEY);
-  if (!data) {
-    saveQuestions(INITIAL_QUESTIONS, false);
-    return INITIAL_QUESTIONS;
-  }
-  return JSON.parse(data);
-}
+  return data ? JSON.parse(data) : INITIAL_QUESTIONS;
+})();
 
-export function saveQuestions(questions: Question[], broadcast = true): void {
-  localStorage.setItem(QUESTIONS_KEY, JSON.stringify(questions));
-  if (broadcast && syncChannel) {
-    syncChannel.postMessage({ type: 'SYNC_QUESTIONS' });
-  }
-}
-
-// Helpers for Config
-export function getExamConfig(): ExamConfig {
+let localConfig: ExamConfig = (() => {
   const data = localStorage.getItem(CONFIG_KEY);
-  if (!data) {
-    saveExamConfig(INITIAL_CONFIG, false);
-    return INITIAL_CONFIG;
-  }
-  return JSON.parse(data);
+  return data ? JSON.parse(data) : INITIAL_CONFIG;
+})();
+
+// Getters returning the synchronized local state instantly
+export function getStudents(): Student[] {
+  return localStudents;
 }
 
-export function saveExamConfig(config: ExamConfig, broadcast = true): void {
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-  if (broadcast && syncChannel) {
-    syncChannel.postMessage({ type: 'SYNC_CONFIG' });
-  }
+export function getQuestions(): Question[] {
+  return localQuestions;
 }
 
-// Subscription helper for react hooks
-export function subscribeToSync(callback: (type: string) => void): () => void {
-  const handleMessage = (event: MessageEvent) => {
-    callback(event.data.type);
-  };
+export function getExamConfig(): ExamConfig {
+  return localConfig;
+}
 
-  const handleStorageChange = (event: StorageEvent) => {
-    if (event.key === STUDENTS_KEY) {
-      callback('SYNC_STUDENTS');
-    } else if (event.key === QUESTIONS_KEY) {
-      callback('SYNC_QUESTIONS');
-    } else if (event.key === CONFIG_KEY) {
-      callback('SYNC_CONFIG');
-    }
-  };
+// 2. Real-time Subscription management for React components
+type SyncCallback = (type: string) => void;
+const subscribers = new Set<SyncCallback>();
 
-  if (syncChannel) {
-    syncChannel.addEventListener('message', handleMessage);
-  }
-  window.addEventListener('storage', handleStorageChange);
-
+export function subscribeToSync(callback: SyncCallback): () => void {
+  subscribers.add(callback);
   return () => {
-    if (syncChannel) {
-      syncChannel.removeEventListener('message', handleMessage);
-    }
-    window.removeEventListener('storage', handleStorageChange);
+    subscribers.delete(callback);
   };
+}
+
+function notifySubscribers(type: string) {
+  subscribers.forEach((cb) => {
+    try {
+      cb(type);
+    } catch (e) {
+      console.error('Error triggering sync callback:', e);
+    }
+  });
+}
+
+// 3. SECURE ERROR HANDLERS as per the Firebase Skill guidelines
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: null,
+      email: null,
+      emailVerified: null,
+      isAnonymous: null,
+      tenantId: null,
+      providerInfo: []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error Details: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+// 4. Test database connection on startup
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(db, 'config', 'examConfig'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error('Please check your Firebase configuration. Client is offline.');
+    }
+  }
+}
+testConnection();
+
+// Populate / Sync from firestore in real-time
+// A. Real-time Config Sync & Seeding Helper
+onSnapshot(
+  doc(db, 'config', 'examConfig'),
+  async (snapshot) => {
+    if (snapshot.exists()) {
+      const data = snapshot.data() as ExamConfig;
+      localConfig = data;
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(data));
+      notifySubscribers('SYNC_CONFIG');
+    } else {
+      // Config collection has not been seeded, write initial parameters to public cloud
+      try {
+        await setDoc(doc(db, 'config', 'examConfig'), INITIAL_CONFIG);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, 'config/examConfig');
+      }
+    }
+  },
+  (error) => {
+    handleFirestoreError(error, OperationType.GET, 'config/examConfig');
+  }
+);
+
+// B. Real-time Questions Sync & Seeding Helper
+onSnapshot(
+  collection(db, 'questions'),
+  async (snapshot) => {
+    if (!snapshot.empty) {
+      const list: Question[] = [];
+      snapshot.forEach((doc) => {
+        list.push(doc.data() as Question);
+      });
+      // Sort to preserve original list index / ID structure
+      list.sort((a, b) => a.id.localeCompare(b.id));
+
+      localQuestions = list;
+      localStorage.setItem(QUESTIONS_KEY, JSON.stringify(list));
+      notifySubscribers('SYNC_QUESTIONS');
+    } else {
+      // Questions bank is empty on cloud instance, batch write original questions
+      try {
+        const batch = writeBatch(db);
+        INITIAL_QUESTIONS.forEach((q) => {
+          const ref = doc(db, 'questions', q.id);
+          batch.set(ref, q);
+        });
+        await batch.commit();
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, 'questions');
+      }
+    }
+  },
+  (error) => {
+    handleFirestoreError(error, OperationType.GET, 'questions');
+  }
+);
+
+// C. Real-time Students List Sync
+onSnapshot(
+  collection(db, 'students'),
+  (snapshot) => {
+    const list: Student[] = [];
+    snapshot.forEach((doc) => {
+      list.push(doc.data() as Student);
+    });
+    // Sort alphabetially by student name
+    list.sort((a, b) => a.name.localeCompare(b.name));
+
+    localStudents = list;
+    localStorage.setItem(STUDENTS_KEY, JSON.stringify(list));
+    notifySubscribers('SYNC_STUDENTS');
+  },
+  (error) => {
+    handleFirestoreError(error, OperationType.GET, 'students');
+  }
+);
+
+// 5. CLOUD PROPAGATION API EXPORTS
+// Save global config parameters
+export async function saveExamConfig(config: ExamConfig, broadcast = true): Promise<void> {
+  localConfig = config;
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+  if (broadcast) notifySubscribers('SYNC_CONFIG');
+
+  try {
+    await setDoc(doc(db, 'config', 'examConfig'), config);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'config/examConfig');
+  }
+}
+
+// Reset/Update entire bank of questions
+export async function saveQuestions(questions: Question[], broadcast = true): Promise<void> {
+  localQuestions = questions;
+  localStorage.setItem(QUESTIONS_KEY, JSON.stringify(questions));
+  if (broadcast) notifySubscribers('SYNC_QUESTIONS');
+
+  try {
+    const existingSnap = await getDocs(collection(db, 'questions'));
+    const existingIds = new Set<string>();
+    existingSnap.forEach((doc) => existingIds.add(doc.id));
+
+    const batch = writeBatch(db);
+    
+    // Save/update questions
+    questions.forEach((q) => {
+      const ref = doc(db, 'questions', q.id);
+      batch.set(ref, q);
+      existingIds.delete(q.id);
+    });
+
+    // Clean up deleted ones
+    existingIds.forEach((id) => {
+      const ref = doc(db, 'questions', id);
+      batch.delete(ref);
+    });
+
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'questions');
+  }
+}
+
+// Save/Synchronize student registry list
+export async function saveStudents(students: Student[], broadcast = true): Promise<void> {
+  localStudents = students;
+  localStorage.setItem(STUDENTS_KEY, JSON.stringify(students));
+  if (broadcast) notifySubscribers('SYNC_STUDENTS');
+
+  try {
+    const existingSnap = await getDocs(collection(db, 'students'));
+    const existingIds = new Set<string>();
+    existingSnap.forEach((doc) => existingIds.add(doc.id));
+
+    const batch = writeBatch(db);
+
+    // Synchronize documents
+    students.forEach((s) => {
+      const ref = doc(db, 'students', s.id);
+      batch.set(ref, s);
+      existingIds.delete(s.id);
+    });
+
+    // Remove any student records deleted from local administration panels
+    existingIds.forEach((id) => {
+      const ref = doc(db, 'students', id);
+      batch.delete(ref);
+    });
+
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'students');
+  }
 }

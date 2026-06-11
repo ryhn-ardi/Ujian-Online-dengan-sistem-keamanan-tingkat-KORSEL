@@ -8,6 +8,7 @@ interface StudentExamProps {
   durationMinutes: number;
   onViolation: (reason: string) => void;
   onSubmitAnswers: (answers: Record<string, number | number[]>) => void;
+  onAnswersUpdate?: (answers: Record<string, number | number[]>) => void;
   onStartExam: () => void;
   onExit: () => void;
 }
@@ -18,6 +19,7 @@ export default function StudentExam({
   durationMinutes,
   onViolation,
   onSubmitAnswers,
+  onAnswersUpdate,
   onStartExam,
   onExit
 }: StudentExamProps) {
@@ -28,6 +30,11 @@ export default function StudentExam({
   const [localPasscode, setLocalPasscode] = useState('');
   const [localPasscodeError, setLocalPasscodeError] = useState('');
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
+
+  // Synchronize local answers state if student answers are reset/modified from parent (e.g. locks/resets)
+  useEffect(() => {
+    setSelectedAnswers(student.answers || {});
+  }, [student.answers]);
 
   const initialWidth = useRef(window.innerWidth);
   const initialHeight = useRef(window.innerHeight);
@@ -162,6 +169,9 @@ export default function StudentExam({
     setSelectedAnswers(updated);
     // Silent background sync
     student.answers = updated;
+    if (onAnswersUpdate) {
+      onAnswersUpdate(updated);
+    }
   };
 
   const handleAutoSubmit = () => {

@@ -91,6 +91,22 @@ export default function App() {
     handleUpdateStudents(updated);
   };
 
+  // 3c. STUDENT FLOW: Save/Update Answers in Real-time
+  const handleStudentAnswersUpdate = (updatedAnswers: Record<string, number | number[]>) => {
+    const freshStudents = getStudents();
+    const updated = freshStudents.map((s) => {
+      if (s.id === currentStudentId) {
+        return {
+          ...s,
+          answers: updatedAnswers,
+          lastActive: new Date().toISOString()
+        };
+      }
+      return s;
+    });
+    handleUpdateStudents(updated);
+  };
+
   // 4. STUDENT FLOW: Violation detection (Strict lock trigger)
   const handleStudentViolation = (reason: string) => {
     const freshStudents = getStudents(); // pull fresh to preserve parallel answers
@@ -214,6 +230,7 @@ export default function App() {
           onViolation={handleStudentViolation}
           onStartExam={handleStartExam}
           onSubmitAnswers={handleStudentSubmit}
+          onAnswersUpdate={handleStudentAnswersUpdate}
           onExit={() => {
             // Delete incomplete record & exit
             const updated = students.filter(s => s.id !== currentStudentId);
