@@ -331,6 +331,26 @@ export default function AdminPanel({
     onUpdateStudents(updated);
   };
 
+  // Reset student violation count only (removes locks & keeps existing answers)
+  const handleResetStudentViolations = (studentId: string) => {
+    if (!window.confirm('Apakah Anda yakin ingin ME-RESET pelanggaran siswa ini menjadi 0? Jika status ujian terkunci, siswa akan bisa mengakses kembali naskah ujian setara tabungan jawaban sebelumnya.')) {
+      return;
+    }
+    const updated = students.map((s) => {
+      if (s.id === studentId) {
+        return {
+          ...s,
+          violationCount: 0,
+          lockedReason: undefined,
+          status: s.status === 'TERKUNCI' ? ('SEDANG_MENGERJAKAN' as const) : s.status
+        };
+      }
+      return s;
+    });
+    onUpdateStudents(updated);
+    alert('Pelanggaran berhasil di-reset menjadi 0 dan status ujian diaktifkan kembali!');
+  };
+
   // Save edited details
   const handleSaveStudentEdit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -880,6 +900,15 @@ export default function AdminPanel({
                               </button>
 
                               <button
+                                id={`btn-reset-violation-${s.id}`}
+                                onClick={() => handleResetStudentViolations(s.id)}
+                                className="p-1 px-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-md transition"
+                                title="Reset Pelanggaran Saja (Bisa Lanjut Ujian)"
+                              >
+                                <ShieldCheck className="w-3.5 h-3.5 inline text-emerald-600" />
+                              </button>
+
+                              <button
                                 id={`btn-delete-student-${s.id}`}
                                 onClick={() => handleDeleteStudent(s.id)}
                                 className="p-1 px-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition"
@@ -1387,7 +1416,125 @@ export default function AdminPanel({
                 </div>
               </div>
 
-              <div className="p-4 bg-teal-50 border border-teal-200 rounded-xl text-xs text-teal-800 space-y-2">
+              {/* SISTEM KEAMANAN & PENGONTROLAN PROKTOR MASTER */}
+              <div className="border-t border-slate-200 pt-6 mt-6 space-y-6">
+                <div>
+                  <h4 className="font-extrabold text-sm text-slate-800 uppercase tracking-wider font-mono flex items-center gap-2 mb-2">
+                    <span className="w-1.5 h-3.5 bg-red-600 rounded-full inline-block animate-pulse"></span>
+                    Pengaturan Tingkat Keamanan (Proctor Core)
+                  </h4>
+                  <p className="text-xs text-slate-500 leading-normal">
+                    Konfigurasi tingkat tinggi kontrol keamanan dan mode naskah anti-curang proktor secara langsung.
+                  </p>
+                </div>
+
+                {/* 1. Toggle Sistem Keamanan Ketat */}
+                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                  <div className="space-y-1 pr-4">
+                    <span className="text-xs font-bold text-slate-800 font-sans block">Sistem Keamanan Ketat (Anti-Cheat Fullscreen)</span>
+                    <span className="text-[11px] text-slate-500 leading-tight block">
+                      Memantau dan membekukan lembar ujian secara otomatis jika siswa meminimalkan window, berpindah tab, atau keluar dari fullscreen.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateConfig({
+                      ...config,
+                      strictSecurityEnabled: config.strictSecurityEnabled !== false ? false : true
+                    })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      config.strictSecurityEnabled !== false ? 'bg-indigo-600' : 'bg-slate-200'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                        config.strictSecurityEnabled !== false ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* 2. Jumlah Pelanggaran Maksimal & Reset Jawaban */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                    <label className="block text-xs font-bold text-slate-800 font-sans uppercase">Batas Maksimal Pelanggaran Toleransi</label>
+                    <p className="text-[11px] text-slate-500 leading-tight mb-2">
+                      Jumlah keluar-masuk layar penuh yang diperbolehkan sebelum status ujian siswa terkunci secara permanen.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        max="20"
+                        value={config.maxAllowedViolations !== undefined ? config.maxAllowedViolations : 3}
+                        onChange={(e) => onUpdateConfig({
+                          ...config,
+                          maxAllowedViolations: Math.max(1, parseInt(e.target.value) || 1)
+                        })}
+                        className="w-24 px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-800 text-sm font-mono text-center font-bold"
+                      />
+                      <span className="text-xs font-semibold text-slate-500">Kali Pelanggaran</span>
+                    </div>
+                  </div>
+
+                  {/* 3. Empty Answers on Lock/Violation Toggle */}
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col justify-between">
+                    <div className="space-y-1 mb-3">
+                      <span className="text-xs font-bold text-slate-800 font-sans block">Kosongkan Jawaban Siswa Jika Terkunci</span>
+                      <span className="text-[11px] text-slate-500 leading-tight block">
+                        Apabila diaktifkan, seluruh instrumen jawaban ujian siswa akan dihapus bersih saat denda melampaui batas toleransi.
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase font-mono">STATUS: {config.clearAnswersOnViolation ? 'AKTIF (KOSONGKAN)' : 'LINDUNGI DATA JAWABAN'}</span>
+                      <button
+                        type="button"
+                        onClick={() => onUpdateConfig({
+                          ...config,
+                          clearAnswersOnViolation: !config.clearAnswersOnViolation
+                        })}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          config.clearAnswersOnViolation ? 'bg-indigo-600' : 'bg-slate-200'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                            config.clearAnswersOnViolation ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Siren sound on Violation */}
+                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                  <div className="space-y-1 pr-4">
+                    <span className="text-xs font-bold text-slate-800 font-sans block">Bunyi Sirine Peringatan Kencang (Siren 5 Detik)</span>
+                    <span className="text-[11px] text-slate-500 leading-tight block">
+                      Setiap kali siswa melanggar (misalnya keluar fullscreen), laksanakan sirine peringatan yang nyaring dari speaker siswa selama 5 detik penuh.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateConfig({
+                      ...config,
+                      sirenAlarmEnabled: config.sirenAlarmEnabled !== false ? false : true
+                    })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      config.sirenAlarmEnabled !== false ? 'bg-indigo-600' : 'bg-slate-200'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                        config.sirenAlarmEnabled !== false ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-4 bg-teal-55 bg-teal-50 border border-teal-200 rounded-xl text-xs text-teal-800 space-y-2">
                 <div className="font-bold uppercase tracking-wider font-mono flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4 text-teal-600" />
                   Kombinasi Pengawasan Aktif

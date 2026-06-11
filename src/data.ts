@@ -110,5 +110,9 @@ export const INITIAL_CONFIG = {
   durationMinutes: 15,
   examTitle: 'ujian berbasis keamanan tingkat korea utara + NASA',
   subject1Name: 'Seni Budaya dan P kelas 8',
-  subject2Name: 'Informatika kelas 7'
+  subject2Name: 'Informatika kelas 7',
+  strictSecurityEnabled: true,
+  maxAllowedViolations: 3,
+  clearAnswersOnViolation: false,
+  sirenAlarmEnabled: true
 };

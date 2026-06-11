@@ -34,4 +34,8 @@ export interface ExamConfig {
   examTitle: string;
   subject1Name?: string; // Display name for Subject 1
   subject2Name?: string; // Display name for Subject 2
+  strictSecurityEnabled?: boolean; // Whether the strict full-screen validation is active
+  maxAllowedViolations?: number; // How many violations are allowed before locking
+  clearAnswersOnViolation?: boolean; // Whether to completely clear student answers on violation
+  sirenAlarmEnabled?: boolean; // Whether to play a loud siren alarm on violation
 }

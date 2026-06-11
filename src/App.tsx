@@ -182,15 +182,29 @@ export default function App() {
         return;
       }
 
-      // Lock exam immediately, keeping existing answers intact!
-      const updatedActive: Student = {
-        ...active,
-        status: 'TERKUNCI',
-        lockedReason: reason,
-        violationCount: (active.violationCount || 0) + 1,
-        lastActive: new Date().toISOString()
-      };
-      saveSingleStudent(updatedActive);
+      const maxAllowed = config.maxAllowedViolations !== undefined ? config.maxAllowedViolations : 3;
+      const nextViolationCount = (active.violationCount || 0) + 1;
+
+      if (nextViolationCount >= maxAllowed) {
+        // Lock exam immediately
+        const updatedActive: Student = {
+          ...active,
+          status: 'TERKUNCI',
+          lockedReason: reason,
+          violationCount: nextViolationCount,
+          answers: config.clearAnswersOnViolation ? {} : active.answers, // Wipe answers if option is active
+          lastActive: new Date().toISOString()
+        };
+        saveSingleStudent(updatedActive);
+      } else {
+        // Just increment violation count and save, letting him continue with warning
+        const updatedActive: Student = {
+          ...active,
+          violationCount: nextViolationCount,
+          lastActive: new Date().toISOString()
+        };
+        saveSingleStudent(updatedActive);
+      }
     }
   };
 
@@ -319,7 +333,7 @@ export default function App() {
         <StudentExam
           student={activeStudent}
           questions={questions.filter(q => (!q.subjectId && (!activeStudent.subjectId || activeStudent.subjectId === 'sub1')) || q.subjectId === activeStudent.subjectId)}
-          durationMinutes={config.durationMinutes}
+          config={config}
           onViolation={handleStudentViolation}
           onStartExam={handleStartExam}
           onSubmitAnswers={handleStudentSubmit}
@@ -362,121 +376,29 @@ export default function App() {
               {/* Real-time score display */}
               <div className="p-6 bg-slate-900 rounded-2xl text-white">
                 <span className="text-[10px] font-bold text-slate-400 tracking-widest uppercase block mb-1 font-mono">Nilai Hasil Ujian</span>
-                <div className="text-5xl font-black tracking-tight text-yellow-405 text-yellow-400 font-mono">
+                <div className="text-5xl font-black tracking-tight text-yellow-400 font-mono">
                   {activeStudent.score !== undefined ? activeStudent.score.toFixed(1) : '0.0'}
                 </div>
-                <div className="text-xs text-slate-350 mt-2">
+                <div className="text-xs text-slate-300 mt-2">
                   Berhasil menjawab benar <strong className="text-white">{activeStudent.correctAnswersCount}</strong> dari <strong className="text-white">{activeStudent.totalQuestions}</strong> pertanyaan.
                 </div>
               </div>
             </div>
 
-            {/* Answer Key Analysis (Kunci Jawaban & Pembahasan) */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-6 sm:p-8 space-y-6">
-              <h2 className="text-lg font-extrabold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-4 mb-4">
-                <BookOpen className="w-5 h-5 text-indigo-500" />
-                Ulasan Jawaban & Pembahasan
-              </h2>
-
-              <div className="space-y-6">
-                {questions
-                  .filter(q => (!q.subjectId && (!activeStudent.subjectId || activeStudent.subjectId === 'sub1')) || q.subjectId === activeStudent.subjectId)
-                  .map((q, qIndex) => {
-                    const studentAns = activeStudent.answers[q.id];
-                  const hasAnswered = studentAns !== undefined && studentAns !== null && (!Array.isArray(studentAns) || studentAns.length > 0);
-                  
-                  let isCorrect = false;
-                  if (hasAnswered) {
-                    if (q.type === 'MR') {
-                      const correctSet = q.correctAnswerIndices || [];
-                      const studentSet = Array.isArray(studentAns) ? studentAns : [studentAns];
-                      isCorrect = studentSet.length === correctSet.length &&
-                        studentSet.every(idx => correctSet.includes(idx));
-                    } else {
-                      const correctIdx = typeof q.correctAnswerIndex === 'number' ? q.correctAnswerIndex : (q.correctAnswerIndices?.[0] ?? 0);
-                      isCorrect = Array.isArray(studentAns) ? studentAns.includes(correctIdx) : studentAns === correctIdx;
-                    }
-                  }
-
-                  const getStudentAnswerText = () => {
-                    if (!hasAnswered) return 'Tidak dijawab';
-                    if (Array.isArray(studentAns)) {
-                      return studentAns.map(idx => `${String.fromCharCode(65 + idx)}. ${q.options[idx]}`).join(', ');
-                    } else {
-                      return `${String.fromCharCode(65 + (studentAns as number))}. ${q.options[studentAns as number]}`;
-                    }
-                  };
-
-                  const getCorrectAnswerText = () => {
-                    if (q.type === 'MR') {
-                      const correctSet = q.correctAnswerIndices || [];
-                      return correctSet.map(idx => `${String.fromCharCode(65 + idx)}. ${q.options[idx]}`).join(', ');
-                    } else {
-                      const correctIdx = typeof q.correctAnswerIndex === 'number' ? q.correctAnswerIndex : (q.correctAnswerIndices?.[0] ?? 0);
-                      return `${String.fromCharCode(65 + correctIdx)}. ${q.options[correctIdx]}`;
-                    }
-                  };
-
-                  return (
-                    <div key={q.id} className="border-b border-slate-100 pb-6 last:border-0 last:pb-0">
-                      <div className="flex items-start gap-3">
-                        <span className={`w-6 h-6 rounded-md font-mono text-xs font-bold flex items-center justify-center shrink-0 border mt-0.5 ${
-                          isCorrect
-                            ? 'bg-emerald-500 border-emerald-600 text-white'
-                            : hasAnswered
-                              ? 'bg-rose-500 border-rose-600 text-white'
-                              : 'bg-slate-400 border-slate-500 text-white'
-                        }`}>
-                          {qIndex + 1}
-                        </span>
-                        
-                        <div className="space-y-3 flex-1">
-                          <div className="flex items-center gap-2">
-                            <h4 className="font-bold text-slate-800 leading-relaxed text-sm flex-1">{q.questionText}</h4>
-                            <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500 font-mono">
-                              {q.type === 'MR' ? 'Pilihan Ganda 2 Jawaban (MR)' : 'Pilihan Ganda Tunggal (MC)'}
-                            </span>
-                          </div>
-                          
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                            <div className="p-2.5 rounded-lg border border-slate-100 bg-slate-50">
-                              <span className="text-slate-400 uppercase tracking-wide font-mono text-[9px] block mb-1">Pilihan Anda:</span>
-                              <span className={`font-semibold ${isCorrect ? 'text-emerald-700' : hasAnswered ? 'text-rose-700' : 'text-slate-400'}`}>
-                                {getStudentAnswerText()}
-                              </span>
-                            </div>
- 
-                            {!isCorrect && (
-                              <div className="p-2.5 rounded-lg border border-emerald-100 bg-emerald-50/50">
-                                <span className="text-emerald-600 uppercase tracking-wide font-mono text-[9px] block mb-1">Kunci Jawaban Benar:</span>
-                                <span className="font-semibold text-emerald-800">
-                                  {getCorrectAnswerText()}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Navigation Back */}
-              <div className="pt-6 border-t border-slate-100 text-center">
-                <button
-                  id="btn-return-home"
-                  onClick={() => {
-                    setCurrentStudentId('');
-                    localStorage.removeItem('active_student_id');
-                    setRole('SETUP');
-                  }}
-                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 px-6 rounded-xl transition duration-150 flex items-center justify-center gap-1"
-                >
-                  Selesai & Keluar Aplikasi
-                  <ArrowRight className="w-4 h-4 text-slate-400" />
-                </button>
-              </div>
+            {/* Navigation Back */}
+            <div className="text-center">
+              <button
+                id="btn-return-home"
+                onClick={() => {
+                  setCurrentStudentId('');
+                  localStorage.removeItem('active_student_id');
+                  setRole('SETUP');
+                }}
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 px-6 rounded-2xl transition duration-150 flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+              >
+                Selesai & Keluar Aplikasi
+                <ArrowRight className="w-4 h-4 text-slate-400 animate-pulse" />
+              </button>
             </div>
 
           </div>

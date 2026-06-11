@@ -351,3 +351,27 @@ export async function deleteSingleStudent(studentId: string, broadcast = true): 
   }
 }
 
+// Fetch single student data directly from server to override cache/snapshots
+export async function getStudentFromServer(studentId: string): Promise<Student | null> {
+  try {
+    const docRef = fsDoc(db, 'students', studentId);
+    const snap = await getDocFromServer(docRef);
+    if (snap.exists()) {
+      const student = snap.data() as Student;
+      // Also update local list in memory
+      const index = localStudents.findIndex((s) => s.id === student.id);
+      if (index !== -1) {
+        localStudents[index] = student;
+      } else {
+        localStudents.push(student);
+      }
+      localStorage.setItem(STUDENTS_KEY, JSON.stringify(localStudents));
+      notifySubscribers('SYNC_STUDENTS');
+      return student;
+    }
+  } catch (err) {
+    console.error('Error fetching student directly from server:', err);
+  }
+  return null;
+}
+

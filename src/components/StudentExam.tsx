@@ -1,27 +1,89 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, AlertTriangle, ShieldAlert, KeyRound, Clock, ChevronLeft, ChevronRight, CheckSquare, Send, CheckCircle } from 'lucide-react';
-import { Student, Question } from '../types';
+import { Play, AlertTriangle, ShieldAlert, KeyRound, Clock, ChevronLeft, ChevronRight, CheckSquare, Send, CheckCircle, RefreshCw } from 'lucide-react';
+import { Student, Question, ExamConfig } from '../types';
+import { getStudentFromServer } from '../utils/sync';
+
+// Synthesizer Siren Alarm (Emergency high-frequency sweeping pitch)
+function playSirenAlarm() {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const lfo = ctx.createOscillator();
+    const lfoGain = ctx.createGain();
+    const mainGain = ctx.createGain();
+    
+    osc1.type = 'sawtooth';
+    osc2.type = 'square';
+    
+    osc1.frequency.setValueAtTime(600, ctx.currentTime);
+    osc2.frequency.setValueAtTime(800, ctx.currentTime);
+    
+    lfo.frequency.setValueAtTime(4, ctx.currentTime); // 4 sweeps per second
+    lfoGain.gain.setValueAtTime(150, ctx.currentTime); // sweep frequency amplitude
+    
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc1.frequency);
+    lfoGain.connect(osc2.frequency);
+    
+    const oscGain1 = ctx.createGain();
+    const oscGain2 = ctx.createGain();
+    oscGain1.gain.setValueAtTime(0.4, ctx.currentTime);
+    oscGain2.gain.setValueAtTime(0.3, ctx.currentTime);
+    
+    osc1.connect(oscGain1);
+    osc2.connect(oscGain2);
+    
+    oscGain1.connect(mainGain);
+    oscGain2.connect(mainGain);
+    
+    mainGain.connect(ctx.destination);
+    
+    // Play for 5 seconds with envelope
+    mainGain.gain.setValueAtTime(0, ctx.currentTime);
+    mainGain.gain.linearRampToValueAtTime(1.0, ctx.currentTime + 0.1); // Fast rise
+    mainGain.gain.setValueAtTime(1.0, ctx.currentTime + 4.7);
+    mainGain.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 5.0); // Fast fall
+    
+    osc1.start();
+    osc2.start();
+    lfo.start();
+    
+    osc1.stop(ctx.currentTime + 5.0);
+    osc2.stop(ctx.currentTime + 5.0);
+    lfo.stop(ctx.currentTime + 5.0);
+    
+    setTimeout(() => {
+      ctx.close().catch(() => {});
+    }, 5500);
+  } catch (err) {
+    console.error('Failed to play synthesized siren sound:', err);
+  }
+}
 
 interface StudentExamProps {
   student: Student;
   questions: Question[];
-  durationMinutes: number;
   onViolation: (reason: string) => void;
   onSubmitAnswers: (answers: Record<string, number | number[]>) => void;
   onAnswersUpdate?: (answers: Record<string, number | number[]>) => void;
   onStartExam: () => void;
   onExit: () => void;
+  config: ExamConfig;
 }
 
 export default function StudentExam({
   student,
   questions,
-  durationMinutes,
   onViolation,
   onSubmitAnswers,
   onAnswersUpdate,
   onStartExam,
-  onExit
+  onExit,
+  config
 }: StudentExamProps) {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, number | number[]>>(student.answers || {});
@@ -30,6 +92,9 @@ export default function StudentExam({
   const [localPasscode, setLocalPasscode] = useState('');
   const [localPasscodeError, setLocalPasscodeError] = useState('');
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [isCurrentlyFullscreen, setIsCurrentlyFullscreen] = useState(!!document.fullscreenElement);
 
   // Synchronize local answers state if student answers are reset/modified from parent (e.g. locks/resets)
   useEffect(() => {
@@ -39,6 +104,7 @@ export default function StudentExam({
   const initialWidth = useRef(window.innerWidth);
   const initialHeight = useRef(window.innerHeight);
   const examStartedRef = useRef(false);
+  const lastViolationTime = useRef(0);
 
   // Set up timer based on remaining time
   useEffect(() => {
@@ -46,16 +112,16 @@ export default function StudentExam({
 
     if (!student.startTime) {
       // First time starting
-      const endTime = new Date(Date.now() + durationMinutes * 60 * 1000).toISOString();
+      const endTime = new Date(Date.now() + config.durationMinutes * 60 * 1000).toISOString();
       const startTime = new Date().toISOString();
-      setTimeRemaining(durationMinutes * 60);
+      setTimeRemaining(config.durationMinutes * 60);
     } else {
       // Resume remaining time
       const end = new Date(student.endTime || '').getTime();
       const remain = Math.max(0, Math.floor((end - Date.now()) / 1000));
       setTimeRemaining(remain);
     }
-  }, [student.status, student.startTime, student.endTime, durationMinutes]);
+  }, [student.status, student.startTime, student.endTime, config.durationMinutes]);
 
   // Countdown clock loop
   useEffect(() => {
@@ -83,32 +149,51 @@ export default function StudentExam({
         await document.documentElement.requestFullscreen();
       }
       setFullscreenFailed(false);
+      setIsCurrentlyFullscreen(true);
     } catch (err) {
       console.error('Request fullscreen failed:', err);
       setFullscreenFailed(true);
+      setIsCurrentlyFullscreen(false);
     }
+  };
+
+  const triggerViolation = (reason: string) => {
+    if (config.strictSecurityEnabled === false) return; // Ignore if security is off
+
+    const now = Date.now();
+    if (now - lastViolationTime.current < 2500) return; // Prevent double trigger
+    lastViolationTime.current = now;
+
+    // Siren alarm if enabled in config
+    if (config.sirenAlarmEnabled !== false) {
+      playSirenAlarm();
+    }
+
+    onViolation(reason);
   };
 
   // Monitor Fullscreen Exit and Focus shifts (THE PROCTOR SENTINELS)
   useEffect(() => {
     if (student.status !== 'SEDANG_MENGERJAKAN') return;
+    if (config.strictSecurityEnabled === false) return; // Ignore if security is off
 
     const handleFullscreenChange = () => {
-      // If student was taking exam and suddenly left fullscreen
-      if (!document.fullscreenElement) {
-        onViolation('Mencoba Keluar dari Layar Penuh (Fullscreen)');
+      const isFs = !!document.fullscreenElement;
+      setIsCurrentlyFullscreen(isFs);
+      if (!isFs) {
+        triggerViolation('Mencoba Keluar dari Layar Penuh (Fullscreen)');
       }
     };
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        onViolation('Berpindah Tab / Meminimalkan Jendela Browser');
+        triggerViolation('Berpindah Tab / Meminimalkan Jendela Browser');
       }
     };
 
     const handleWindowBlur = () => {
       // Let standard browser clicks settle, only trigger blur if actually losing active focus
-      onViolation('Membuka Aplikasi Lain / Melakukan Split Screen / Floating Apps');
+      triggerViolation('Membuka Aplikasi Lain / Melakukan Split Screen / Floating Apps');
     };
 
     const handleResize = () => {
@@ -117,7 +202,7 @@ export default function StudentExam({
       
       // If viewport drops significantly during exam, could be split screen
       if (window.innerWidth < 640 || parsedWidthDiff > 250 || parsedHeightDiff > 200) {
-        onViolation('Mendeteksi Perubahan Jendela (Split Screen / Floating Apps)');
+        triggerViolation('Mendeteksi Perubahan Jendela (Split Screen / Floating Apps)');
       }
     };
 
@@ -137,7 +222,7 @@ export default function StudentExam({
       window.removeEventListener('blur', handleWindowBlur);
       window.removeEventListener('resize', handleResize);
     };
-  }, [student.status, onViolation]);
+  }, [student.status, config.strictSecurityEnabled]);
 
   const handleSelectOption = (questionId: string, optionIndex: number) => {
     const questionObj = questions.find(q => q.id === questionId);
@@ -203,6 +288,28 @@ export default function StudentExam({
     }
   };
 
+  const handleAutoUnlockCheck = async () => {
+    setIsCheckingStatus(true);
+    setStatusMessage('');
+    try {
+      const serverStudent = await getStudentFromServer(student.id);
+      if (serverStudent) {
+        if (serverStudent.status !== 'TERKUNCI') {
+          setStatusMessage('Kunci berhasil dibuka oleh Proktor! Menghubungkan...');
+        } else {
+          setStatusMessage('Sesi Anda masih Terkunci pada sistem Proktor. Silakan lapor ke pengawas Anda.');
+        }
+      } else {
+        setStatusMessage('Gagal mengambil data terbaru. Coba lagi.');
+      }
+    } catch (err) {
+      console.error(err);
+      setStatusMessage('Kesalahan koneksi server.');
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
+
   const formatTime = (seconds: number) => {
     const min = Math.floor(seconds / 60);
     const sec = seconds % 60;
@@ -228,23 +335,57 @@ export default function StudentExam({
           </div>
 
           <p className="text-sm text-red-100 leading-relaxed mb-6">
-            Sistem pengawasan mendeteksi tindakan tidak aman. Lembar ujian Anda telah dibekukan. Harap segera melapor kepada Pengawas/Proktor kelas untuk membuka kunci ujian Anda.
+            Sistem pengawasan mendeteksi tindakan tidak aman. Lembar ujian Anda telah dibekukan. Harap melapor kepada Pengawas/Proktor kelas untuk membuka kunci ujian Anda atau klik tombol refresh di bawah.
           </p>
 
+          {/* Real-time Buka Kunci tanpa Password Button */}
+          <div className="mb-6 p-4 bg-emerald-950/45 border border-emerald-500/20 rounded-2xl text-left">
+            <h3 className="text-xs font-bold text-emerald-400 font-mono tracking-wider mb-2 uppercase">Metode 1: Buka Kunci Tanpa Sandi</h3>
+            <button
+              type="button"
+              id="btn-auto-unlock-refresh"
+              onClick={handleAutoUnlockCheck}
+              disabled={isCheckingStatus}
+              className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-800 text-slate-950 font-black py-3 px-4 rounded-xl shadow-md transition duration-150 flex items-center justify-center gap-2 text-xs uppercase tracking-wider cursor-pointer active:scale-[0.98]"
+            >
+              {isCheckingStatus ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  Memeriksa Status Proktor...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Cek & Buka Kunci Otomatis
+                </>
+              )}
+            </button>
+            
+            {statusMessage ? (
+              <p className="text-xs text-yellow-300 font-semibold mt-2 leading-relaxed">
+                {statusMessage}
+              </p>
+            ) : (
+              <p className="text-[11px] text-emerald-200 mt-2 leading-tight">
+                Jika Proktor sudah membuka kunci Anda dari admin panel, klik tombol hijau di atas untuk langsung kembali melanjutkan ujian secara otomatis tanpa password.
+              </p>
+            )}
+          </div>
+
           <div className="border-t border-white/20 pt-6">
-            <p className="text-xs text-red-200 font-mono uppercase mb-3">Metode Buka Blokir Pengawas</p>
+            <p className="text-xs text-red-200 font-mono uppercase mb-3">Metode 2: Masukkan Kode Pengawas (Manual)</p>
             <div className="flex gap-2">
               <input
                 type="password"
                 placeholder="Kode Pengawas Kelas"
                 value={localPasscode}
                 onChange={(e) => setLocalPasscode(e.target.value)}
-                className="flex-1 px-3 py-2 bg-red-950 border border-white/20 rounded-lg text-white font-serif text-center placeholder-red-300 focus:outline-none focus:ring-1 focus:ring-white"
+                className="flex-1 px-3 py-2 bg-red-950 border border-white/20 rounded-lg text-white font-serif text-center placeholder-red-300 focus:outline-none focus:ring-1 focus:ring-white text-sm"
               />
               <button
                 id="btn-unlock-locally"
                 onClick={handleUnlockWithCode}
-                className="bg-yellow-400 hover:bg-yellow-300 text-red-950 font-bold px-4 py-2 rounded-lg transition text-sm flex items-center gap-1.5"
+                className="bg-yellow-400 hover:bg-yellow-300 text-red-950 font-bold px-4 py-2 rounded-lg transition text-sm flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
               >
                 <KeyRound className="w-4 h-4" />
                 Unlock
@@ -257,6 +398,59 @@ export default function StudentExam({
               *Proktor utama juga dapat menekan tombol "Unlock" pada layar utama Admin secara real-time dari komputer pengawas kelas.
             </p>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 1b. --- RENDERING: BLOCKED SCENE IF EXITING FULLSCREEN ---
+  if (config.strictSecurityEnabled !== false && !isCurrentlyFullscreen && student.status === 'SEDANG_MENGERJAKAN') {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4 text-white text-center font-sans">
+        <div className="max-w-md w-full bg-slate-900 border border-red-500/30 rounded-2xl p-8 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 inset-x-0 h-1.5 bg-red-600 animate-pulse"></div>
+          
+          <div className="inline-flex items-center justify-center p-4 bg-red-500/10 rounded-2xl mb-6 text-red-500">
+            <AlertTriangle className="w-12 h-12" />
+          </div>
+          
+          <h2 className="text-xl font-extrabold tracking-tight text-red-400 mb-2 uppercase">Layar Ujian Dibekukan</h2>
+          <p className="text-slate-300 text-sm mb-6 leading-relaxed">
+            Anda terdeteksi keluar dari mode Layar Penuh (Fullscreen). Silakan klik tombol di bawah untuk masuk kembali ke mode ujian.
+          </p>
+
+          <div className="bg-slate-950/85 p-4 rounded-xl border border-white/5 mb-6 text-left text-xs space-y-1.5 font-mono">
+            <div className="flex justify-between text-slate-400">
+              <span>Siswa:</span>
+              <span className="text-white font-bold">{student.name}</span>
+            </div>
+            <div className="flex justify-between text-slate-400">
+              <span>Pelanggaran Saat Ini:</span>
+              <span className="text-red-400 font-bold">{student.violationCount || 0} Kali</span>
+            </div>
+            <div className="flex justify-between text-slate-400">
+              <span>Batas Toleransi:</span>
+              <span className="text-yellow-400 font-bold">{config.maxAllowedViolations !== undefined ? config.maxAllowedViolations : 3} Kali</span>
+            </div>
+            <div className="flex justify-between text-slate-400">
+              <span>Sisa Kesempatan:</span>
+              <span className="text-emerald-400 font-extrabold">
+                {Math.max(0, (config.maxAllowedViolations !== undefined ? config.maxAllowedViolations : 3) - (student.violationCount || 0))} Kali
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            id="btn-re-enter-fullscreen"
+            onClick={async () => {
+              await requestFullscreen();
+            }}
+            className="w-full bg-red-650 bg-red-600 hover:bg-red-500 text-white font-black py-3.5 px-6 rounded-xl transition duration-155 flex items-center justify-center gap-2 shadow-lg cursor-pointer active:scale-[0.98]"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Kembali ke Layar Penuh (Ujian)
+          </button>
         </div>
       </div>
     );
