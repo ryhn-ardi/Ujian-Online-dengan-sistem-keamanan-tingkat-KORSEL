@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldCheck, UserCheck, Settings, AlertTriangle, AlertCircle, Info } from 'lucide-react';
+import { ShieldCheck, UserCheck, Settings, AlertTriangle, AlertCircle, Info, RefreshCw } from 'lucide-react';
 import { Student } from '../types';
 
 interface StudentRegistrationProps {
@@ -8,6 +8,7 @@ interface StudentRegistrationProps {
   onAdminLogin: () => void;
   examTitle: string;
   durationMinutes: number;
+  totalQuestions: number;
 }
 
 export default function StudentRegistration({
@@ -15,7 +16,8 @@ export default function StudentRegistration({
   onRegister,
   onAdminLogin,
   examTitle,
-  durationMinutes
+  durationMinutes,
+  totalQuestions
 }: StudentRegistrationProps) {
   const [name, setName] = useState('');
   const [absentNumber, setAbsentNumber] = useState('');
@@ -203,6 +205,49 @@ export default function StudentRegistration({
             </button>
           </form>
         </div>
+
+        {/* Status Sinkronisasi Real-time Database Cloud */}
+        <div 
+          id="realtime-sync-status-container" 
+          className="mt-6 bg-white rounded-2xl p-5 border border-slate-200 shadow-xs text-xs font-mono flex flex-col md:flex-row items-center justify-between gap-4"
+        >
+          <div className="flex items-center gap-3 w-full md:w-auto">
+            <span className="relative flex h-3 w-3 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-405 bg-emerald-450 bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+            </span>
+            <div className="text-left">
+              <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                <span>TERHUBUNG KE CLOUD</span>
+                <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider font-mono">LIVE</span>
+              </div>
+              <div className="text-[10px] text-slate-400 mt-0.5 tracking-tight font-sans">
+                Sinkronisasi: <strong className="text-indigo-600 font-mono font-semibold">{totalQuestions} Butir Soal Aktif</strong> • {students.length} Siswa Terdaftar
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            id="btn-force-reload-sync"
+            onClick={() => {
+              // Clear cache keys to guarantee absolute clean fetch
+              localStorage.removeItem('proktor_questions');
+              localStorage.removeItem('proktor_config');
+              localStorage.removeItem('proktor_students');
+              // Soft feedback then reload
+              const btn = document.getElementById('btn-force-reload-sync');
+              if (btn) btn.innerText = "MEMBERSIHKAN CACHE...";
+              setTimeout(() => {
+                window.location.reload();
+              }, 500);
+            }}
+            className="w-full md:w-auto inline-flex items-center justify-center gap-1.5 text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 px-3.5 py-2 rounded-xl border border-indigo-100 transition-all cursor-pointer font-bold shrink-0 uppercase active:scale-[0.98]"
+          >
+            <RefreshCw className="w-3.5 h-3.5 animate-spin" style={{ animationDuration: '3s' }} />
+            Bersihkan Cache & Sinkron Ulang
+          </button>
+        </div>
+
       </div>
 
       {/* Footer & Mode Admin */}

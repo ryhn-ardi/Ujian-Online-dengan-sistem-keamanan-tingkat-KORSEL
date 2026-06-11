@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getStudents, saveStudents, getQuestions, saveQuestions, getExamConfig, saveExamConfig, subscribeToSync } from './utils/sync';
+import { getStudents, saveStudents, getQuestions, saveQuestions, getExamConfig, saveExamConfig, subscribeToSync, isInitialSyncCompleted } from './utils/sync';
 import { Student, Question, ExamConfig, StudentStatus } from './types';
 import StudentRegistration from './components/StudentRegistration';
 import StudentExam from './components/StudentExam';
@@ -12,12 +12,14 @@ export default function App() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [config, setConfig] = useState<ExamConfig>({ durationMinutes: 15, examTitle: '' });
   const [currentStudentId, setCurrentStudentId] = useState<string>('');
+  const [isDbSynced, setIsDbSynced] = useState<boolean>(false);
 
   // 1. Load initial states on mount
   useEffect(() => {
     setStudents(getStudents());
     setQuestions(getQuestions());
     setConfig(getExamConfig());
+    setIsDbSynced(isInitialSyncCompleted());
 
     // 2. Subscribe to real-time tab updates
     const unsubscribe = subscribeToSync((syncType) => {
@@ -29,6 +31,7 @@ export default function App() {
       } else if (syncType === 'SYNC_CONFIG') {
         setConfig(getExamConfig());
       }
+      setIsDbSynced(isInitialSyncCompleted());
     });
 
     return () => unsubscribe();
@@ -208,6 +211,44 @@ export default function App() {
     }
   }, [students, role, activeStudent]);
 
+  if (!isDbSynced) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4">
+        <div className="text-center max-w-sm w-full space-y-6">
+          <div className="relative flex justify-center">
+            {/* Spinning elegant custom loader */}
+            <div className="w-16 h-16 border-4 border-indigo-500/10 border-t-indigo-500 rounded-full animate-spin"></div>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <RefreshCw className="w-5 h-5 text-indigo-400 animate-pulse" />
+            </div>
+          </div>
+          
+          <div className="space-y-1.5">
+            <h2 className="text-white font-bold tracking-tight text-lg">Mempersiapkan Lembar Ujian...</h2>
+            <p className="text-[10px] text-indigo-200/50 font-mono text-center tracking-wider px-4">
+              SINKRONISASI REAL-TIME DENGAN CLOUD DATABASE
+            </p>
+          </div>
+          
+          <div className="bg-slate-800/40 p-4.5 rounded-2xl border border-slate-700/30 text-[10px] font-mono text-slate-400 space-y-2 text-left leading-relaxed">
+            <div className="flex items-center justify-between">
+              <span>Menghubungkan ke Cloud...</span>
+              <span className="text-emerald-400 font-bold">TERKONEKSI</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Membersihkan Cache Presensi...</span>
+              <span className="text-indigo-400 font-bold uppercase">OTOMATIS</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Mengunduh Bank Soal Aktif...</span>
+              <span className="text-amber-400 font-bold animate-pulse">MEMPROSES</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
       {/* 1. SETUP / WELCOME SCREEN */}
@@ -218,6 +259,7 @@ export default function App() {
           onAdminLogin={() => setRole('ADMIN')}
           examTitle={config.examTitle || 'Ujian Digital'}
           durationMinutes={config.durationMinutes}
+          totalQuestions={questions.length}
         />
       )}
 

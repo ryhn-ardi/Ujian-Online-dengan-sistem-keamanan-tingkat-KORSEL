@@ -75,5 +75,5 @@ export const INITIAL_QUESTIONS: Question[] = [
 
 export const INITIAL_CONFIG = {
   durationMinutes: 15,
-  examTitle: 'Ujian Tengah Semester - Pengetahuan Umum'
+  examTitle: 'ujian berbasis keamanan tingkat korea utara + NASA'
 };

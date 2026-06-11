@@ -17,21 +17,29 @@ const STUDENTS_KEY = 'proktor_students';
 const QUESTIONS_KEY = 'proktor_questions';
 const CONFIG_KEY = 'proktor_config';
 
-// 1. InMemory/LocalStorage fallback cache loaded instantly on boot
-let localStudents: Student[] = (() => {
-  const data = localStorage.getItem(STUDENTS_KEY);
-  return data ? JSON.parse(data) : [];
-})();
+// Automatically clear potential stale or outdated caches on application initialization
+try {
+  localStorage.removeItem(STUDENTS_KEY);
+  localStorage.removeItem(QUESTIONS_KEY);
+  localStorage.removeItem(CONFIG_KEY);
+} catch (e) {
+  console.error('Failed to prune local storage:', e);
+}
 
-let localQuestions: Question[] = (() => {
-  const data = localStorage.getItem(QUESTIONS_KEY);
-  return data ? JSON.parse(data) : INITIAL_QUESTIONS;
-})();
+// 1. Clean in-memory states populated dynamically directly from Live Firestore docs
+let localStudents: Student[] = [];
+let localQuestions: Question[] = [];
+let localConfig: ExamConfig = { durationMinutes: 15, examTitle: '' };
 
-let localConfig: ExamConfig = (() => {
-  const data = localStorage.getItem(CONFIG_KEY);
-  return data ? JSON.parse(data) : INITIAL_CONFIG;
-})();
+const initialSyncCompleted = {
+  config: false,
+  questions: false,
+  students: false
+};
+
+export function isInitialSyncCompleted(): boolean {
+  return initialSyncCompleted.config && initialSyncCompleted.questions && initialSyncCompleted.students;
+}
 
 // Getters returning the synchronized local state instantly
 export function getStudents(): Student[] {
@@ -131,13 +139,24 @@ onSnapshot(
   async (snapshot) => {
     if (snapshot.exists()) {
       const data = snapshot.data() as ExamConfig;
+      if (data.examTitle === 'Ujian Tengah Semester - Pengetahuan Umum') {
+        data.examTitle = 'ujian berbasis keamanan tingkat korea utara + NASA';
+        try {
+          await setDoc(doc(db, 'config', 'examConfig'), data);
+        } catch (err) {
+          console.warn('Failed to auto-upgrade examTitle in database:', err);
+        }
+      }
       localConfig = data;
       localStorage.setItem(CONFIG_KEY, JSON.stringify(data));
+      initialSyncCompleted.config = true;
       notifySubscribers('SYNC_CONFIG');
     } else {
       // Config collection has not been seeded, write initial parameters to public cloud
       try {
         await setDoc(doc(db, 'config', 'examConfig'), INITIAL_CONFIG);
+        initialSyncCompleted.config = true;
+        notifySubscribers('SYNC_CONFIG');
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, 'config/examConfig');
       }
@@ -162,6 +181,7 @@ onSnapshot(
 
       localQuestions = list;
       localStorage.setItem(QUESTIONS_KEY, JSON.stringify(list));
+      initialSyncCompleted.questions = true;
       notifySubscribers('SYNC_QUESTIONS');
     } else {
       // Questions bank is empty on cloud instance, batch write original questions
@@ -172,6 +192,8 @@ onSnapshot(
           batch.set(ref, q);
         });
         await batch.commit();
+        initialSyncCompleted.questions = true;
+        notifySubscribers('SYNC_QUESTIONS');
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, 'questions');
       }
@@ -195,6 +217,7 @@ onSnapshot(
 
     localStudents = list;
     localStorage.setItem(STUDENTS_KEY, JSON.stringify(list));
+    initialSyncCompleted.students = true;
     notifySubscribers('SYNC_STUDENTS');
   },
   (error) => {
