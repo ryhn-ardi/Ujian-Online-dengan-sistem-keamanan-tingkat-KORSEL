@@ -79,7 +79,7 @@ export default function StudentRegistration({
           </div>
           <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">{examTitle}</h1>
           <p className="mt-2 text-sm text-slate-500 font-mono">
-            SISTEM PENGAWASAN DIGITAL KETAT (PROKTOR ANTI-CONTEK) • {durationMinutes} MENIT
+            SISTEM PENGAWASAN DIGITAL KETAT (PROKTOR ANTI-CONTEK)
           </p>
         </div>
 

@@ -357,6 +357,15 @@ export default function AdminPanel({
       return;
     }
 
+    // Helper to safely escape CSV cells
+    const escapeCsvCell = (val: any): string => {
+      if (val === null || val === undefined) return '';
+      const str = String(val);
+      // Replace any double quotes with standard double-double quotes for CSV standard
+      const escaped = str.replace(/"/g, '""');
+      return `"${escaped}"`;
+    };
+
     // Header row
     const headers = [
       'No',
@@ -385,9 +394,9 @@ export default function AdminPanel({
 
       return [
         idx + 1,
-        `"${s.name.replace(/"/g, '""')}"`,
+        s.name,
         s.absentNumber,
-        `"${s.studentClass}"`,
+        s.studentClass,
         s.status === 'TERKUNCI' ? 'TERKOMPROMISI / TERKUNCI' : s.status,
         s.violationCount,
         correctCount,
@@ -398,8 +407,13 @@ export default function AdminPanel({
       ];
     });
 
-    // Excel friendly CSV joining lines with BOM for correct character rendering
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    // We use a semicolon ';' as separator because it is highly compatible with Indonesian localized computers.
+    // By adding the 'sep=;' line, Microsoft Excel is hard-forced to recognize the semicolon layout automatically!
+    const separator = ';';
+    const csvContent = '\uFEFF' + `sep=${separator}\n` + [
+      headers.map(escapeCsvCell).join(separator), 
+      ...rows.map(row => row.map(escapeCsvCell).join(separator))
+    ].join('\n');
     
     // Download chemical reaction
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
