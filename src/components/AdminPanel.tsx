@@ -297,9 +297,9 @@ export default function AdminPanel({
       if (s.id === studentId) {
         return {
           ...s,
-          status: 'SEDANG_MENGERJAKAN' as const,
+          status: 'BELUM_MULAI' as const,
           lockedReason: undefined,
-          answers: {}
+          answers: s.answers || {} // Preserve existing student answers on unlock
         };
       }
       return s;
@@ -358,6 +358,71 @@ export default function AdminPanel({
     }
     const updated = students.filter((s) => s.id !== studentId);
     onUpdateStudents(updated);
+  };
+
+  // Unlock all locked students at once
+  const handleUnlockAllStudents = () => {
+    const lockedStudents = students.filter((s) => s.status === 'TERKUNCI');
+    if (lockedStudents.length === 0) {
+      alert('Tidak ada siswa yang berstatus TERKUNCI saat ini.');
+      return;
+    }
+    if (!window.confirm(`Apakah Anda yakin ingin membuka kunci untuk seluruh (${lockedStudents.length}) siswa yang terblokir?`)) {
+      return;
+    }
+    const updated = students.map((s) => {
+      if (s.status === 'TERKUNCI') {
+        return {
+          ...s,
+          status: 'BELUM_MULAI' as const,
+          lockedReason: undefined,
+          answers: s.answers || {} // Preserve answers already typed
+        };
+      }
+      return s;
+    });
+    onUpdateStudents(updated);
+    alert(`Sukses membuka kunci untuk ${lockedStudents.length} siswa!`);
+  };
+
+  // Mass reset entire student progress (reset to BELUM_MULAI with clean scores & answers)
+  const handleResetAllStudents = () => {
+    if (students.length === 0) {
+      alert('Tidak ada data siswa untuk diriset.');
+      return;
+    }
+    if (!window.confirm('Apakah Anda yakin ingin melakukan RESET MASAL seluruh pengerjaan siswa? Semua jawaban yang tersimpan akan dikosongkan dan sisa waktu pengerjaan akan diuji ulang dari awal.')) {
+      return;
+    }
+    const updated = students.map((s) => ({
+      ...s,
+      status: 'BELUM_MULAI' as const,
+      answers: {},
+      violationCount: 0,
+      lockedReason: undefined,
+      score: undefined,
+      correctAnswersCount: undefined,
+      startTime: undefined,
+      endTime: undefined
+    }));
+    onUpdateStudents(updated);
+    alert('Progress pengerjaan seluruh siswa berhasil di-reset masal!');
+  };
+
+  // Delete all student records permanently
+  const handleDeleteAllStudents = () => {
+    if (students.length === 0) {
+      alert('Tidak ada data siswa yang bisa dihapus.');
+      return;
+    }
+    if (!window.confirm('PERINGATAN KERAS: Apakah Anda yakin ingin MENGHAPUS SELURUH riwayat ujian dan daftar siswa secara permanen dari database cloud?')) {
+      return;
+    }
+    if (!window.confirm('Tindakan ini tidak bisa dibatalkan dan semua nilai siswa akan musnah. Konfirmasi sekali lagi untuk menghapus seluruh siswa?')) {
+      return;
+    }
+    onUpdateStudents([]);
+    alert('Seluruh data siswa berhasil dihapus bersih!');
   };
 
   // --- ACTIONS: EXPORT NILAI TO EXCEL (CSV Format with excel compatibility) ---
@@ -608,6 +673,50 @@ export default function AdminPanel({
                 <div className="text-2xl font-extrabold text-red-700 mt-1">
                   {students.filter(s => s.status === 'TERKUNCI').length}
                 </div>
+              </div>
+            </div>
+
+            {/* Panel Kontrol Masal Pengawas / Proktor */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-4 bg-indigo-600 rounded-full inline-block"></span>
+                  <h4 className="font-extrabold text-xs sm:text-sm text-slate-800 uppercase tracking-wider font-mono">
+                    Panel Kontrol Manajemen Masal (Proktor Master)
+                  </h4>
+                </div>
+                <span className="px-2 py-0.5 text-[10px] bg-red-100 text-red-700 font-bold rounded font-mono">ADJUSTMENTS DISPATCHER</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <button
+                  type="button"
+                  id="btn-bulk-unlock"
+                  onClick={handleUnlockAllStudents}
+                  className="px-4 py-3.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 border border-indigo-200 hover:border-indigo-300 font-extrabold rounded-xl text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98] shadow-xs"
+                >
+                  <KeyRound className="w-4 h-4 text-indigo-650" />
+                  Buka Kunci Semua Siswa ({students.filter(s => s.status === 'TERKUNCI').length})
+                </button>
+
+                <button
+                  type="button"
+                  id="btn-bulk-reset"
+                  onClick={handleResetAllStudents}
+                  className="px-4 py-3.5 bg-amber-50 hover:bg-amber-100 text-amber-700 hover:text-amber-805 border border-amber-200 hover:border-amber-300 font-extrabold rounded-xl text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98] shadow-xs"
+                >
+                  <RefreshCw className="w-4 h-4 text-amber-650" />
+                  Reset Masal Sesi Siswa
+                </button>
+
+                <button
+                  type="button"
+                  id="btn-bulk-wipe"
+                  onClick={handleDeleteAllStudents}
+                  className="px-4 py-3.5 bg-red-50 hover:bg-red-100 text-red-700 hover:text-red-800 border border-red-200 hover:border-red-305 font-extrabold rounded-xl text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98] shadow-xs"
+                >
+                  <Trash2 className="w-4 h-4 text-red-650" />
+                  Hapus Semua Siswa & Nilai
+                </button>
               </div>
             </div>
 

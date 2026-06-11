@@ -43,17 +43,25 @@ export default function StudentRegistration({
     if (!studentClass.trim()) return setError('Kelas wajib diisi');
     if (!agreed) return setError('Anda harus menyetujui seluruh pakta integritas ujian');
 
-    // Duplicate string validation: "jika ada nama siswa yang mengandung karakter sama, maka tidak boleh melakukan ujian lebih dari 1x, dia perlu reset ke admin terlebih dahulu"
+    // Duplicate string validation and re-connection logic
     const normalizedNewName = name.trim().toLowerCase().replace(/\s+/g, '');
-    const isDuplicate = students.some((s) => {
+    const existingStudentObj = students.find((s) => {
       const normalizedExisting = s.name.trim().toLowerCase().replace(/\s+/g, '');
       return normalizedExisting === normalizedNewName;
     });
 
-    if (isDuplicate) {
-      return setError(
-        `Nama siswa "${name.trim()}" sudah terdaftar dalam sistem dan tidak boleh menempuh ujian lebih dari 1 kali. Silakan hubungi proktor / admin kelas untuk mereset data pengerjaan Anda di menu admin!`
-      );
+    if (existingStudentObj) {
+      if (existingStudentObj.status === 'SELESAI') {
+        return setError(
+          `Nama siswa "${name.trim()}" sudah menyelesaikan ujian ini dan hasil pengerjaan telah dikonfirmasi. Anda tidak dapat melakukan ujian kembali.`
+        );
+      }
+      if (existingStudentObj.status === 'TERKUNCI') {
+        return setError(
+          `Sesi ujian untuk siswa "${name.trim()}" saat ini dibekukan (TERKUNCI) oleh pengawas kelas karena terdeteksi keluar dari layar penuh / split screen. Silakan lapor ke proktor di depan kelas untuk membuka kunci ujian Anda!`
+        );
+      }
+      // If status is 'BELUM_MULAI' or 'SEDANG_MENGERJAKAN', we fall through to let them reconnect seamlessly!
     }
 
     setError('');
@@ -175,14 +183,24 @@ export default function StudentRegistration({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-500 uppercase font-mono tracking-wider mb-2">Kelas / Tingkat</label>
-                <input
-                  type="text"
+                <select
                   required
-                  placeholder="Contoh: XII IPA 1"
                   value={studentClass}
                   onChange={(e) => setStudentClass(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl text-slate-800 focus:outline-none transition duration-200"
-                />
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl text-slate-800 focus:outline-none transition duration-200 font-semibold"
+                >
+                  <option value="">-- Pilih Kelas --</option>
+                  <optgroup label="Tingkat Kelas 7">
+                    {['7A', '7B', '7C', '7D', '7E', '7F', '7G', '7H', '7I', '7J', '7K'].map((cls) => (
+                      <option key={cls} value={cls}>Kelas {cls}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Tingkat Kelas 8">
+                    {['8A', '8B', '8C', '8D', '8E', '8F', '8G', '8H', '8I', '8J', '8K'].map((cls) => (
+                      <option key={cls} value={cls}>Kelas {cls}</option>
+                    ))}
+                  </optgroup>
+                </select>
               </div>
 
               <div className="md:col-span-2">

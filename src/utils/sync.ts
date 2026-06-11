@@ -319,3 +319,35 @@ export async function saveStudents(students: Student[], broadcast = true): Promi
     handleFirestoreError(err, OperationType.WRITE, 'students');
   }
 }
+
+// Save/Update a single student session document in Firestore
+export async function saveSingleStudent(student: Student, broadcast = true): Promise<void> {
+  const index = localStudents.findIndex((s) => s.id === student.id);
+  if (index !== -1) {
+    localStudents[index] = student;
+  } else {
+    localStudents.push(student);
+  }
+  localStorage.setItem(STUDENTS_KEY, JSON.stringify(localStudents));
+  if (broadcast) notifySubscribers('SYNC_STUDENTS');
+
+  try {
+    await setDoc(doc(db, 'students', student.id), student);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `students/${student.id}`);
+  }
+}
+
+// Delete a single student session document from Firestore
+export async function deleteSingleStudent(studentId: string, broadcast = true): Promise<void> {
+  localStudents = localStudents.filter((s) => s.id !== studentId);
+  localStorage.setItem(STUDENTS_KEY, JSON.stringify(localStudents));
+  if (broadcast) notifySubscribers('SYNC_STUDENTS');
+
+  try {
+    await deleteDoc(doc(db, 'students', studentId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `students/${studentId}`);
+  }
+}
+

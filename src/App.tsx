@@ -1,5 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { getStudents, saveStudents, getQuestions, saveQuestions, getExamConfig, saveExamConfig, subscribeToSync, isInitialSyncCompleted } from './utils/sync';
+import {
+  getStudents,
+  saveStudents,
+  getQuestions,
+  saveQuestions,
+  getExamConfig,
+  saveExamConfig,
+  subscribeToSync,
+  isInitialSyncCompleted,
+  saveSingleStudent,
+  deleteSingleStudent
+} from './utils/sync';
 import { Student, Question, ExamConfig, StudentStatus } from './types';
 import StudentRegistration from './components/StudentRegistration';
 import StudentExam from './components/StudentExam';
@@ -11,7 +22,13 @@ export default function App() {
   const [students, setStudents] = useState<Student[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [config, setConfig] = useState<ExamConfig>({ durationMinutes: 15, examTitle: '' });
-  const [currentStudentId, setCurrentStudentId] = useState<string>('');
+  const [currentStudentId, setCurrentStudentId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('active_student_id') || '';
+    } catch (e) {
+      return '';
+    }
+  });
   const [isDbSynced, setIsDbSynced] = useState<boolean>(false);
 
   // 1. Load initial states on mount
@@ -37,6 +54,25 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Monitor initial database and student sync to restore student session on refresh
+  useEffect(() => {
+    if (isDbSynced && currentStudentId) {
+      const active = students.find((s) => s.id === currentStudentId);
+      if (active) {
+        if (active.status === 'SELESAI') {
+          setRole('STUDENT_FINISHED');
+        } else {
+          setRole('STUDENT_EXAM');
+        }
+      } else {
+        // Cached session was deleted from admin panel, wipe local cache
+        setCurrentStudentId('');
+        localStorage.removeItem('active_student_id');
+        setRole('SETUP');
+      }
+    }
+  }, [isDbSynced, students, currentStudentId]);
+
   // Sync state helpers
   const handleUpdateStudents = (updatedList: Student[]) => {
     setStudents(updatedList);
@@ -53,11 +89,35 @@ export default function App() {
     saveExamConfig(updatedConfig);
   };
 
-  // 3. STUDENT FLOW: Registration Action
+  // 3. STUDENT FLOW: Registration Action (Supports Reconnection after reset / reload)
   const handleRegisterStudent = (data: { name: string; absentNumber: string; studentClass: string; subjectId: string }) => {
     const existingStudents = getStudents();
     
-    // Create new student session object
+    // Check if there's an existing registered student with matching name
+    const normalizedNewName = data.name.trim().toLowerCase().replace(/\s+/g, '');
+    const existing = existingStudents.find((s) => {
+      const normalizedExisting = s.name.trim().toLowerCase().replace(/\s+/g, '');
+      return normalizedExisting === normalizedNewName;
+    });
+
+    if (existing) {
+      // Reconnect to existing session, updating basic parameters if they changed
+      const updatedStudent: Student = {
+        ...existing,
+        studentClass: data.studentClass,
+        absentNumber: data.absentNumber,
+        subjectId: data.subjectId,
+        lastActive: new Date().toISOString()
+      };
+      
+      saveSingleStudent(updatedStudent);
+      setCurrentStudentId(existing.id);
+      localStorage.setItem('active_student_id', existing.id);
+      setRole('STUDENT_EXAM');
+      return;
+    }
+
+    // Create new student session object for first-time registration
     const newStudentId = `siswa_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
     const newStudent: Student = {
       id: newStudentId,
@@ -71,81 +131,74 @@ export default function App() {
       subjectId: data.subjectId
     };
 
-    const updated = [...existingStudents, newStudent];
-    handleUpdateStudents(updated);
+    saveSingleStudent(newStudent);
     setCurrentStudentId(newStudentId);
+    localStorage.setItem('active_student_id', newStudentId);
     setRole('STUDENT_EXAM');
   };
 
   // 3b. STUDENT FLOW: Start Exam Action
   const handleStartExam = () => {
     const freshStudents = getStudents();
-    const updated = freshStudents.map((s) => {
-      if (s.id === currentStudentId) {
-        return {
-          ...s,
-          status: 'SEDANG_MENGERJAKAN' as const,
-          startTime: new Date().toISOString(),
-          endTime: new Date(Date.now() + config.durationMinutes * 60 * 1000).toISOString(),
-          lastActive: new Date().toISOString()
-        };
-      }
-      return s;
-    });
-    handleUpdateStudents(updated);
+    const active = freshStudents.find((s) => s.id === currentStudentId);
+    if (active) {
+      const updatedActive: Student = {
+        ...active,
+        status: 'SEDANG_MENGERJAKAN',
+        startTime: new Date().toISOString(),
+        endTime: new Date(Date.now() + config.durationMinutes * 60 * 1000).toISOString(),
+        lastActive: new Date().toISOString()
+      };
+      saveSingleStudent(updatedActive);
+    }
   };
 
   // 3c. STUDENT FLOW: Save/Update Answers in Real-time
   const handleStudentAnswersUpdate = (updatedAnswers: Record<string, number | number[]>) => {
     const freshStudents = getStudents();
-    const updated = freshStudents.map((s) => {
-      if (s.id === currentStudentId) {
-        return {
-          ...s,
-          answers: updatedAnswers,
-          lastActive: new Date().toISOString()
-        };
-      }
-      return s;
-    });
-    handleUpdateStudents(updated);
+    const active = freshStudents.find((s) => s.id === currentStudentId);
+    if (active) {
+      const updatedActive: Student = {
+        ...active,
+        answers: updatedAnswers,
+        lastActive: new Date().toISOString()
+      };
+      saveSingleStudent(updatedActive);
+    }
   };
 
   // 4. STUDENT FLOW: Violation detection (Strict lock trigger)
   const handleStudentViolation = (reason: string) => {
     const freshStudents = getStudents(); // pull fresh to preserve parallel answers
-    const updated = freshStudents.map((s) => {
-      if (s.id === currentStudentId) {
-        if (reason === 'unlocked_locally') {
-          // Unlocked locally via supervisor code entry on student seat
-          return {
-            ...s,
-            status: 'SEDANG_MENGERJAKAN' as const,
-            lockedReason: undefined
-          };
-        }
-
-        // Lock exam immediately
-        return {
-          ...s,
-          status: 'TERKUNCI' as const,
-          lockedReason: reason,
-          violationCount: (s.violationCount || 0) + 1,
-          answers: {},
-          lastActive: new Date().toISOString()
+    const active = freshStudents.find((s) => s.id === currentStudentId);
+    if (active) {
+      if (reason === 'unlocked_locally') {
+        const updatedActive: Student = {
+          ...active,
+          status: 'SEDANG_MENGERJAKAN',
+          lockedReason: undefined
         };
+        saveSingleStudent(updatedActive);
+        return;
       }
-      return s;
-    });
 
-    handleUpdateStudents(updated);
+      // Lock exam immediately, keeping existing answers intact!
+      const updatedActive: Student = {
+        ...active,
+        status: 'TERKUNCI',
+        lockedReason: reason,
+        violationCount: (active.violationCount || 0) + 1,
+        lastActive: new Date().toISOString()
+      };
+      saveSingleStudent(updatedActive);
+    }
   };
 
   // 5. STUDENT FLOW: Final Answers Submission & Calculation
   const handleStudentSubmit = (selectedAnswers: Record<string, number | number[]>) => {
     const freshStudents = getStudents();
-    const currentStudentObj = freshStudents.find(s => s.id === currentStudentId);
-    if (!currentStudentObj) return;
+    const active = freshStudents.find(s => s.id === currentStudentId);
+    if (!active) return;
 
     // Direct Score assessment
     let correctCount = 0;
@@ -182,23 +235,18 @@ export default function App() {
 
     const finalScore = maxPoints > 0 ? (earnedPoints / maxPoints) * 100 : 0;
 
-    const updated = freshStudents.map((s) => {
-      if (s.id === currentStudentId) {
-        return {
-          ...s,
-          status: 'SELESAI' as const,
-          answers: selectedAnswers,
-          correctAnswersCount: correctCount,
-          totalQuestions: questions.length,
-          score: finalScore,
-          endTime: new Date().toISOString(),
-          lastActive: new Date().toISOString()
-        };
-      }
-      return s;
-    });
+    const updatedActive: Student = {
+      ...active,
+      status: 'SELESAI',
+      answers: selectedAnswers,
+      correctAnswersCount: correctCount,
+      totalQuestions: questions.length,
+      score: finalScore,
+      endTime: new Date().toISOString(),
+      lastActive: new Date().toISOString()
+    };
 
-    handleUpdateStudents(updated);
+    saveSingleStudent(updatedActive);
     setRole('STUDENT_FINISHED');
   };
 
@@ -276,10 +324,13 @@ export default function App() {
           onStartExam={handleStartExam}
           onSubmitAnswers={handleStudentSubmit}
           onAnswersUpdate={handleStudentAnswersUpdate}
-          onExit={() => {
+          onExit={async () => {
             // Delete incomplete record & exit
-            const updated = students.filter(s => s.id !== currentStudentId);
-            handleUpdateStudents(updated);
+            if (currentStudentId) {
+              await deleteSingleStudent(currentStudentId);
+            }
+            setCurrentStudentId('');
+            localStorage.removeItem('active_student_id');
             setRole('SETUP');
           }}
         />
@@ -417,6 +468,7 @@ export default function App() {
                   id="btn-return-home"
                   onClick={() => {
                     setCurrentStudentId('');
+                    localStorage.removeItem('active_student_id');
                     setRole('SETUP');
                   }}
                   className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 px-6 rounded-xl transition duration-150 flex items-center justify-center gap-1"
