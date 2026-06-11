@@ -296,6 +296,7 @@ export default function StudentExam({
       if (serverStudent) {
         if (serverStudent.status !== 'TERKUNCI') {
           setStatusMessage('Kunci berhasil dibuka oleh Proktor! Menghubungkan...');
+          await requestFullscreen();
         } else {
           setStatusMessage('Sesi Anda masih Terkunci pada sistem Proktor. Silakan lapor ke pengawas Anda.');
         }

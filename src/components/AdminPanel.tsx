@@ -26,6 +26,8 @@ export default function AdminPanel({
 
   // Search filter query
   const [studentSearch, setStudentSearch] = useState('');
+  const [selectedClassFilter, setSelectedClassFilter] = useState('all');
+  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState('all');
 
   // Student editor modals state
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
@@ -40,6 +42,7 @@ export default function AdminPanel({
   const [qOptions, setQOptions] = useState<string[]>(['', '', '', '']);
   const [qCorrect, setQCorrect] = useState<number>(0);
   const [qSubjectId, setQSubjectId] = useState<string>('sub1');
+  const [qScore, setQScore] = useState<number>(20);
   const [questionFilterSubject, setQuestionFilterSubject] = useState<string>('all');
 
   // States for CSV/Excel Question Import
@@ -50,12 +53,14 @@ export default function AdminPanel({
 
   const filteredStudents = students.filter(s => {
     const q = studentSearch.toLowerCase().trim();
-    if (!q) return true;
-    return (
+    const matchesSearch = !q || (
       (s.name || '').toLowerCase().includes(q) ||
       (s.studentClass || '').toLowerCase().includes(q) ||
       (s.absentNumber || '').toLowerCase().includes(q)
     );
+    const matchesClass = selectedClassFilter === 'all' || (s.studentClass || '') === selectedClassFilter;
+    const matchesSubject = selectedSubjectFilter === 'all' || (s.subjectId || 'sub1') === selectedSubjectFilter;
+    return matchesSearch && matchesClass && matchesSubject;
   });
 
   const handleDownloadTemplate = () => {
@@ -291,13 +296,14 @@ export default function AdminPanel({
 
   // --- ACTIONS: STUDENT MANAGEMENT ---
 
-  // Real-time unlock! Set status back to 'SEDANG_MENGERJAKAN'
+  // Real-time unlock! Set status back to 'SEDANG_MENGERJAKAN' and reset violations to 0
   const handleUnlockStudent = (studentId: string) => {
     const updated = students.map((s) => {
       if (s.id === studentId) {
         return {
           ...s,
-          status: 'BELUM_MULAI' as const,
+          status: 'SEDANG_MENGERJAKAN' as const,
+          violationCount: 0, // Reset violation count on unlock!
           lockedReason: undefined,
           answers: s.answers || {} // Preserve existing student answers on unlock
         };
@@ -380,21 +386,22 @@ export default function AdminPanel({
     onUpdateStudents(updated);
   };
 
-  // Unlock all locked students at once
+  // Unlock all locked students at once and reset their violations
   const handleUnlockAllStudents = () => {
     const lockedStudents = students.filter((s) => s.status === 'TERKUNCI');
     if (lockedStudents.length === 0) {
       alert('Tidak ada siswa yang berstatus TERKUNCI saat ini.');
       return;
     }
-    if (!window.confirm(`Apakah Anda yakin ingin membuka kunci untuk seluruh (${lockedStudents.length}) siswa yang terblokir?`)) {
+    if (!window.confirm(`Apakah Anda yakin ingin membuka kunci untuk seluruh (${lockedStudents.length}) siswa yang terblokir? (Jumlah pelanggaran mereka juga akan kembali ke 0)`)) {
       return;
     }
     const updated = students.map((s) => {
       if (s.status === 'TERKUNCI') {
         return {
           ...s,
-          status: 'BELUM_MULAI' as const,
+          status: 'SEDANG_MENGERJAKAN' as const,
+          violationCount: 0, // Reset violation count on unlock!
           lockedReason: undefined,
           answers: s.answers || {} // Preserve answers already typed
         };
@@ -402,7 +409,27 @@ export default function AdminPanel({
       return s;
     });
     onUpdateStudents(updated);
-    alert(`Sukses membuka kunci untuk ${lockedStudents.length} siswa!`);
+    alert(`Sukses membuka kunci & me-reset pelanggaran untuk ${lockedStudents.length} siswa!`);
+  };
+
+  // Mass reset entire student violations to 0
+  const handleResetAllViolations = () => {
+    const activeWithViolations = students.filter((s) => (s.violationCount || 0) > 0);
+    if (students.length === 0) {
+      alert('Tidak ada data siswa untuk di-reset pelanggarannya.');
+      return;
+    }
+    if (!window.confirm('Apakah Anda yakin ingin MELAKUKAN RESET MASAL PELANGGARAN untuk seluruh siswa? Semua jumlah pelanggaran siswa akan kembali ke 0, dan yang berstatus TERKUNCI akan otomatis berada dalam status SEDANG_MENGERJAKAN kembali.')) {
+      return;
+    }
+    const updated = students.map((s) => ({
+      ...s,
+      violationCount: 0,
+      lockedReason: undefined,
+      status: s.status === 'TERKUNCI' ? ('SEDANG_MENGERJAKAN' as const) : s.status
+    }));
+    onUpdateStudents(updated);
+    alert('Seluruh pelanggaran siswa berhasil di-reset bersih menjadi 0!');
   };
 
   // Mass reset entire student progress (reset to BELUM_MULAI with clean scores & answers)
@@ -539,7 +566,7 @@ export default function AdminPanel({
         correctAnswerIndex: qCorrect,
         correctAnswerIndices: [qCorrect],
         type: 'MC',
-        score: 20,
+        score: qScore,
         subjectId: qSubjectId
       };
       onUpdateQuestions([...questions, newQ]);
@@ -552,7 +579,8 @@ export default function AdminPanel({
             options: qOptions.map(o => o.trim()),
             correctAnswerIndex: qCorrect,
             correctAnswerIndices: q.correctAnswerIndices || [qCorrect],
-            subjectId: qSubjectId
+            subjectId: qSubjectId,
+            score: qScore
           };
         }
         return q;
@@ -566,6 +594,7 @@ export default function AdminPanel({
     setQText('');
     setQOptions(['', '', '', '']);
     setQCorrect(0);
+    setQScore(20);
   };
 
   const handleDeleteQuestion = (questionId: string) => {
@@ -707,7 +736,7 @@ export default function AdminPanel({
                 </div>
                 <span className="px-2 py-0.5 text-[10px] bg-red-100 text-red-700 font-bold rounded font-mono">ADJUSTMENTS DISPATCHER</span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <button
                   type="button"
                   id="btn-bulk-unlock"
@@ -715,7 +744,17 @@ export default function AdminPanel({
                   className="px-4 py-3.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 border border-indigo-200 hover:border-indigo-300 font-extrabold rounded-xl text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98] shadow-xs"
                 >
                   <KeyRound className="w-4 h-4 text-indigo-650" />
-                  Buka Kunci Semua Siswa ({students.filter(s => s.status === 'TERKUNCI').length})
+                  Buka Kunci Semua ({students.filter(s => s.status === 'TERKUNCI').length})
+                </button>
+
+                <button
+                  type="button"
+                  id="btn-bulk-reset-violations"
+                  onClick={handleResetAllViolations}
+                  className="px-4 py-3.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 hover:text-emerald-800 border border-emerald-200 hover:border-emerald-300 font-extrabold rounded-xl text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98] shadow-xs"
+                >
+                  <ShieldCheck className="w-4 h-4 text-emerald-650" />
+                  Reset Masal Pelanggaran ({students.filter(s => (s.violationCount || 0) > 0).length})
                 </button>
 
                 <button
@@ -725,7 +764,7 @@ export default function AdminPanel({
                   className="px-4 py-3.5 bg-amber-50 hover:bg-amber-100 text-amber-700 hover:text-amber-805 border border-amber-200 hover:border-amber-300 font-extrabold rounded-xl text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98] shadow-xs"
                 >
                   <RefreshCw className="w-4 h-4 text-amber-650" />
-                  Reset Masal Sesi Siswa
+                  Reset Masal Sesi
                 </button>
 
                 <button
@@ -735,38 +774,71 @@ export default function AdminPanel({
                   className="px-4 py-3.5 bg-red-50 hover:bg-red-100 text-red-700 hover:text-red-800 border border-red-200 hover:border-red-305 font-extrabold rounded-xl text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98] shadow-xs"
                 >
                   <Trash2 className="w-4 h-4 text-red-650" />
-                  Hapus Semua Siswa & Nilai
+                  Hapus Semua Data
                 </button>
               </div>
             </div>
 
             {/* Students Table */}
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
-              <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <div>
                   <h3 className="font-bold text-slate-800">Daftar Kehadiran & Nilai Siswa</h3>
                   <span className="text-xs text-slate-400 italic">Nilai otomatis dikalkulasi real-time saat siswa klik kumpul atau waktu habis</span>
                 </div>
-                {/* Search Bar Input */}
-                <div className="relative shrink-0 w-full sm:w-72">
-                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
-                    <Search className="w-4 h-4" />
-                  </span>
-                  <input
-                    type="text"
-                    placeholder="Cari nama, kelas, atau absen siswa..."
-                    value={studentSearch}
-                    onChange={(e) => setStudentSearch(e.target.value)}
-                    className="w-full pl-9 pr-8 py-2 border border-slate-200 bg-white rounded-xl text-xs text-slate-700 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                  />
-                  {studentSearch && (
-                    <button
-                      onClick={() => setStudentSearch('')}
-                      className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-405 hover:text-slate-600 font-bold text-sm"
+                
+                {/* Search & Filter Controls Grid */}
+                <div className="flex flex-col sm:flex-row flex-wrap items-center gap-3">
+                  {/* Search Bar Input */}
+                  <div className="relative w-full sm:w-60 md:w-64">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                      <Search className="w-4 h-4" />
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="Cari nama, kelas, atau absen..."
+                      value={studentSearch}
+                      onChange={(e) => setStudentSearch(e.target.value)}
+                      className="w-full pl-9 pr-8 py-2 border border-slate-200 bg-white rounded-xl text-xs text-slate-700 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors font-sans"
+                    />
+                    {studentSearch && (
+                      <button
+                        onClick={() => setStudentSearch('')}
+                        className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 font-bold text-sm"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Filter Kelas Drops */}
+                  <div className="flex items-center gap-1.5 w-full sm:w-auto shrink-0">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase font-mono sm:inline hidden">Kelas:</span>
+                    <select
+                      value={selectedClassFilter}
+                      onChange={(e) => setSelectedClassFilter(e.target.value)}
+                      className="w-full sm:w-auto px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-indigo-500"
                     >
-                      ×
-                    </button>
-                  )}
+                      <option value="all">Semua Kelas ({students.length})</option>
+                      {Array.from(new Set(students.map(s => s.studentClass).filter(Boolean))).sort().map(cls => (
+                        <option key={cls} value={cls}>{cls} ({students.filter(s => s.studentClass === cls).length})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Filter Mapel/Paket Drops */}
+                  <div className="flex items-center gap-1.5 w-full sm:w-auto shrink-0">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase font-mono sm:inline hidden">Paket:</span>
+                    <select
+                      value={selectedSubjectFilter}
+                      onChange={(e) => setSelectedSubjectFilter(e.target.value)}
+                      className="w-full sm:w-auto px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="all">Semua Paket ({students.length})</option>
+                      <option value="sub1">{config.subject1Name || 'Paket A'} ({students.filter(s => !s.subjectId || s.subjectId === 'sub1').length})</option>
+                      <option value="sub2">{config.subject2Name || 'Paket B'} ({students.filter(s => s.subjectId === 'sub2').length})</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
@@ -1238,6 +1310,20 @@ export default function AdminPanel({
                     })}
                   </div>
 
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase font-mono tracking-wider mb-2">Skor / Bobot Nilai Soal (Angka)</label>
+                    <input
+                      type="number"
+                      required
+                      min={0}
+                      step="any"
+                      placeholder="Masukkan bobot skor soal (contoh: 20)..."
+                      value={qScore}
+                      onChange={(e) => setQScore(Number(e.target.value) || 0)}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl text-slate-800 text-sm focus:outline-none transition font-semibold"
+                    />
+                  </div>
+
                   <div className="border-t border-slate-100 pt-5 flex justify-end gap-2 text-sm pt-4">
                     <button
                       type="button"
@@ -1302,6 +1388,7 @@ export default function AdminPanel({
                               setQOptions(q.options);
                               setQCorrect(q.correctAnswerIndex);
                               setQSubjectId(q.subjectId || 'sub1');
+                              setQScore(q.score !== undefined ? q.score : 20);
                             }}
                             className="p-1 px-2 hover:bg-slate-100 text-slate-500 hover:text-indigo-600 rounded-md transition"
                             title="Edit Soal"
