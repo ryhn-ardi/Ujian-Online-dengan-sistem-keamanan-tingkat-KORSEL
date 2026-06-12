@@ -2,6 +2,53 @@ import React, { useState } from 'react';
 import { Users, FileSpreadsheet, RefreshCw, KeyRound, Edit, Trash2, Plus, Save, BookOpen, Clock, X, ChevronRight, Check, AlertTriangle, ShieldCheck, Search } from 'lucide-react';
 import { Student, Question, ExamConfig } from '../types';
 
+// Helper to calculate actual subject metrics for a student
+export function getStudentMetrics(s: Student, questionsList: Question[]) {
+  const studentQuestions = questionsList.filter(
+    (q) => (!q.subjectId && (!s.subjectId || s.subjectId === 'sub1')) || q.subjectId === s.subjectId
+  );
+  const totalQuestions = studentQuestions.length;
+
+  let correctAnswersCount = 0;
+  let earnedPoints = 0;
+  let maxPoints = 0;
+
+  studentQuestions.forEach((q) => {
+    const qScore = typeof q.score === 'number' ? q.score : 10;
+    maxPoints += qScore;
+
+    const ans = s.answers?.[q.id];
+    if (ans !== undefined) {
+      if (q.type === 'MR') {
+        const correctSet = q.correctAnswerIndices || [];
+        const studentSet = Array.isArray(ans) ? ans : [ans];
+        const isCorrect = studentSet.length === correctSet.length &&
+          studentSet.every(idx => correctSet.includes(idx));
+
+        if (isCorrect) {
+          correctAnswersCount++;
+          earnedPoints += qScore;
+        }
+      } else {
+        const correctIdx = typeof q.correctAnswerIndex === 'number' ? q.correctAnswerIndex : (q.correctAnswerIndices?.[0] ?? 0);
+        const isCorrect = Array.isArray(ans) ? ans.includes(correctIdx) : ans === correctIdx;
+        if (isCorrect) {
+          correctAnswersCount++;
+          earnedPoints += qScore;
+        }
+      }
+    }
+  });
+
+  const finalScore = maxPoints > 0 ? (earnedPoints / maxPoints) * 100 : 0;
+
+  return {
+    correctAnswersCount,
+    totalQuestions,
+    score: finalScore
+  };
+}
+
 interface AdminPanelProps {
   students: Student[];
   questions: Question[];
@@ -50,6 +97,7 @@ export default function AdminPanel({
   const [importError, setImportError] = useState('');
   const [importSuccess, setImportSuccess] = useState('');
   const [showImportArea, setShowImportArea] = useState(false);
+  const [importSubjectTarget, setImportSubjectTarget] = useState<string>('auto');
 
   const filteredStudents = students.filter(s => {
     const q = studentSearch.toLowerCase().trim();
@@ -265,6 +313,13 @@ export default function AdminPanel({
           targetSubjectId = 'sub2';
         }
 
+        // Apply chosen target subject override
+        if (importSubjectTarget === 'sub1') {
+          targetSubjectId = 'sub1';
+        } else if (importSubjectTarget === 'sub2') {
+          targetSubjectId = 'sub2';
+        }
+
         importedQs.push({
           id: `q_imported_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 4)}`,
           questionText: soalText,
@@ -283,8 +338,20 @@ export default function AdminPanel({
       }
 
       if (mode === 'OVERWRITE') {
-        onUpdateQuestions(importedQs);
-        setImportSuccess(`Sukses mengganti seluruh bank soal dengan ${importedQs.length} butir soal baru dari Excel!`);
+        let updatedList: Question[] = [];
+        if (importSubjectTarget === 'sub1') {
+          const otherQs = questions.filter(q => q.subjectId === 'sub2');
+          updatedList = [...otherQs, ...importedQs];
+          setImportSuccess(`Sukses mengganti bank soal ${config.subject1Name || 'Paket A'} dengan ${importedQs.length} butir soal baru (soal Paket B tetap utuh)!`);
+        } else if (importSubjectTarget === 'sub2') {
+          const otherQs = questions.filter(q => !q.subjectId || q.subjectId === 'sub1');
+          updatedList = [...otherQs, ...importedQs];
+          setImportSuccess(`Sukses mengganti bank soal ${config.subject2Name || 'Paket B'} dengan ${importedQs.length} butir soal baru (soal Paket A tetap utuh)!`);
+        } else {
+          updatedList = importedQs;
+          setImportSuccess(`Sukses mengganti seluruh bank soal dengan ${importedQs.length} butir soal baru dari Excel!`);
+        }
+        onUpdateQuestions(updatedList);
       } else {
         onUpdateQuestions([...questions, ...importedQs]);
         setImportSuccess(`Sukses menambahkan ${importedQs.length} butir soal baru ke bank soal aktif!`);
@@ -540,9 +607,10 @@ export default function AdminPanel({
     ];
 
     const rows = students.map((s, idx) => {
-      const correctCount = s.correctAnswersCount !== undefined ? s.correctAnswersCount : '-';
-      const totalCount = s.totalQuestions !== undefined ? s.totalQuestions : questions.filter(q => (!q.subjectId && (!s.subjectId || s.subjectId === 'sub1')) || q.subjectId === s.subjectId).length;
-      const finalScore = s.score !== undefined ? s.score.toFixed(1) : '-';
+      const metrics = getStudentMetrics(s, questions);
+      const correctCount = s.status === 'SELESAI' ? metrics.correctAnswersCount : (s.correctAnswersCount !== undefined ? s.correctAnswersCount : '-');
+      const totalCount = metrics.totalQuestions;
+      const finalScore = s.status === 'SELESAI' ? metrics.score.toFixed(1) : (s.score !== undefined ? s.score.toFixed(1) : '-');
       
       const formatTimeText = (isoStr?: string) => {
         if (!isoStr) return '-';
@@ -948,7 +1016,9 @@ export default function AdminPanel({
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {filteredStudents.map((s) => {
-                        const scoreBg = s.score !== undefined && s.score >= 70 ? 'bg-green-100 text-green-800' : 'bg-rose-100 text-rose-800';
+                        const metrics = getStudentMetrics(s, questions);
+                        const displayScore = s.status === 'SELESAI' ? metrics.score : s.score;
+                        const scoreBg = displayScore !== undefined && displayScore >= 70 ? 'bg-green-100 text-green-800' : 'bg-rose-100 text-rose-800';
                         
                         return (
                           <tr key={s.id} className="hover:bg-slate-50/50 transition duration-150">
@@ -997,12 +1067,12 @@ export default function AdminPanel({
                               </span>
                             </td>
                             <td className="px-6 py-4 font-mono text-xs text-slate-400">
-                              {s.answers ? `${Object.keys(s.answers).length}/${questions.filter(q => (!q.subjectId && (!s.subjectId || s.subjectId === 'sub1')) || q.subjectId === s.subjectId).length}` : '0'}
+                              {s.answers ? `${Object.keys(s.answers).length}/${metrics.totalQuestions}` : '0'}
                             </td>
                             <td className="px-6 py-4 font-bold">
-                              {s.score !== undefined ? (
+                              {displayScore !== undefined ? (
                                 <span className={`px-2.5 py-1 text-xs font-extrabold rounded-md ${scoreBg} font-mono`}>
-                                  {s.score.toFixed(1)} / 100
+                                  {displayScore.toFixed(1)} / 100
                                 </span>
                               ) : (
                                 <span className="text-slate-300 font-mono">-</span>
@@ -1117,7 +1187,7 @@ export default function AdminPanel({
                     setQText('');
                     setQOptions(['', '', '', '']);
                     setQCorrect(0);
-                    setQSubjectId('sub1');
+                    setQSubjectId(questionFilterSubject === 'all' ? 'sub1' : questionFilterSubject);
                     setShowImportArea(false);
                   }}
                   className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm rounded-xl transition flex items-center justify-center gap-1.5 self-start sm:self-auto shadow-sm"
@@ -1207,6 +1277,59 @@ export default function AdminPanel({
                     </li>
                     <li>Tanda bintang <code className="font-mono text-red-600 font-bold">*</code> atau <code className="font-mono text-red-600 font-bold">**</code> ini otomatis dihapus oleh sistem saat ujian dikerjakan siswa, sehingga kunci jawaban aman rahasia.</li>
                   </ol>
+                </div>
+
+                {/* PILIHAN SASARAN IMPORT (SLOT / PAKET) */}
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                  <span id="label-import-target-paket" className="block text-xs font-black text-slate-700 uppercase tracking-wider">
+                    📋 SASARAN PAKET SOAL (SLOT) UNTUK HASIL IMPORT:
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <button
+                      type="button"
+                      id="opt-import-auto"
+                      onClick={() => setImportSubjectTarget('auto')}
+                      className={`py-2 px-3 rounded-lg border text-xs font-extrabold transition flex items-center justify-center gap-1.5 focus:outline-none ${
+                        importSubjectTarget === 'auto'
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700 shadow-sm'
+                          : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      {importSubjectTarget === 'auto' && <Check className="w-3.5 h-3.5 font-bold" />}
+                      Otomatis Dari Kolom CSV
+                    </button>
+                    <button
+                      type="button"
+                      id="opt-import-paket-a"
+                      onClick={() => setImportSubjectTarget('sub1')}
+                      className={`py-2 px-3 rounded-lg border text-xs font-extrabold transition flex items-center justify-center gap-1.5 focus:outline-none ${
+                        importSubjectTarget === 'sub1'
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700 shadow-sm'
+                          : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      {importSubjectTarget === 'sub1' && <Check className="w-3.5 h-3.5 font-bold" />}
+                      Paket A ({config.subject1Name || 'IPA'})
+                    </button>
+                    <button
+                      type="button"
+                      id="opt-import-paket-b"
+                      onClick={() => setImportSubjectTarget('sub2')}
+                      className={`py-2 px-3 rounded-lg border text-xs font-extrabold transition flex items-center justify-center gap-1.5 focus:outline-none ${
+                        importSubjectTarget === 'sub2'
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700 shadow-sm'
+                          : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      {importSubjectTarget === 'sub2' && <Check className="w-3.5 h-3.5 font-bold" />}
+                      Paket B ({config.subject2Name || 'IPS'})
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-medium">
+                    {importSubjectTarget === 'auto' && "*Sistem akan menentukan mata pelajaran (sub1/sub2) berdasarkan isi kolom ke-8 (terakhir) pada file CSV Anda."}
+                    {importSubjectTarget === 'sub1' && `*Seluruh soal hasil import otomatis disematkan ke Paket A (${config.subject1Name || 'IPA'}). Opsi OVERWRITE hanya akan menghapus soal Paket A.`}
+                    {importSubjectTarget === 'sub2' && `*Seluruh soal hasil import otomatis disematkan ke Paket B (${config.subject2Name || 'IPS'}). Opsi OVERWRITE hanya akan menghapus soal Paket B.`}
+                  </p>
                 </div>
 
                 {importError && (

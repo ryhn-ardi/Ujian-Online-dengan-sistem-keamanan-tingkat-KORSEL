@@ -17,6 +17,53 @@ import StudentExam from './components/StudentExam';
 import AdminPanel from './components/AdminPanel';
 import { ShieldCheck, GraduationCap, Award, RefreshCw, XCircle, ArrowRight, CheckCircle2, ChevronRight, AlertTriangle, BookOpen } from 'lucide-react';
 
+// Shared helper to calculate actual slot/subject questions, score, and correct count for a student
+export function getStudentMetrics(s: Student, questionsList: Question[]) {
+  const studentQuestions = questionsList.filter(
+    (q) => (!q.subjectId && (!s.subjectId || s.subjectId === 'sub1')) || q.subjectId === s.subjectId
+  );
+  const totalQuestions = studentQuestions.length;
+
+  let correctAnswersCount = 0;
+  let earnedPoints = 0;
+  let maxPoints = 0;
+
+  studentQuestions.forEach((q) => {
+    const qScore = typeof q.score === 'number' ? q.score : 10;
+    maxPoints += qScore;
+
+    const ans = s.answers?.[q.id];
+    if (ans !== undefined) {
+      if (q.type === 'MR') {
+        const correctSet = q.correctAnswerIndices || [];
+        const studentSet = Array.isArray(ans) ? ans : [ans];
+        const isCorrect = studentSet.length === correctSet.length &&
+          studentSet.every(idx => correctSet.includes(idx));
+
+        if (isCorrect) {
+          correctAnswersCount++;
+          earnedPoints += qScore;
+        }
+      } else {
+        const correctIdx = typeof q.correctAnswerIndex === 'number' ? q.correctAnswerIndex : (q.correctAnswerIndices?.[0] ?? 0);
+        const isCorrect = Array.isArray(ans) ? ans.includes(correctIdx) : ans === correctIdx;
+        if (isCorrect) {
+          correctAnswersCount++;
+          earnedPoints += qScore;
+        }
+      }
+    }
+  });
+
+  const finalScore = maxPoints > 0 ? (earnedPoints / maxPoints) * 100 : 0;
+
+  return {
+    correctAnswersCount,
+    totalQuestions,
+    score: finalScore
+  };
+}
+
 export default function App() {
   const [role, setRole] = useState<'SETUP' | 'STUDENT_EXAM' | 'STUDENT_FINISHED' | 'ADMIN'>('SETUP');
   const [students, setStudents] = useState<Student[]>([]);
@@ -214,48 +261,17 @@ export default function App() {
     const active = freshStudents.find(s => s.id === currentStudentId);
     if (!active) return;
 
-    // Direct Score assessment
-    let correctCount = 0;
-    let earnedPoints = 0;
-    let maxPoints = 0;
-
-    questions.forEach((q) => {
-      const qScore = typeof q.score === 'number' ? q.score : 10;
-      maxPoints += qScore;
-
-      const ans = selectedAnswers[q.id];
-      if (ans !== undefined) {
-        if (q.type === 'MR') {
-          const correctSet = q.correctAnswerIndices || [];
-          const studentSet = Array.isArray(ans) ? ans : [ans];
-          const isCorrect = studentSet.length === correctSet.length &&
-            studentSet.every(idx => correctSet.includes(idx));
-          
-          if (isCorrect) {
-            correctCount++;
-            earnedPoints += qScore;
-          }
-        } else {
-          // MC
-          const correctIdx = typeof q.correctAnswerIndex === 'number' ? q.correctAnswerIndex : (q.correctAnswerIndices?.[0] ?? 0);
-          const isCorrect = Array.isArray(ans) ? ans.includes(correctIdx) : ans === correctIdx;
-          if (isCorrect) {
-            correctCount++;
-            earnedPoints += qScore;
-          }
-        }
-      }
-    });
-
-    const finalScore = maxPoints > 0 ? (earnedPoints / maxPoints) * 100 : 0;
+    // Use shared slot-specific helper
+    const activeWithNewAnswers = { ...active, answers: selectedAnswers };
+    const metrics = getStudentMetrics(activeWithNewAnswers, questions);
 
     const updatedActive: Student = {
       ...active,
       status: 'SELESAI',
       answers: selectedAnswers,
-      correctAnswersCount: correctCount,
-      totalQuestions: questions.length,
-      score: finalScore,
+      correctAnswersCount: metrics.correctAnswersCount,
+      totalQuestions: metrics.totalQuestions,
+      score: metrics.score,
       endTime: new Date().toISOString(),
       lastActive: new Date().toISOString()
     };
@@ -351,59 +367,62 @@ export default function App() {
       )}
 
       {/* 3. STUDENT SCORE & SUBMISSION ANALYSIS PREVIEW */}
-      {role === 'STUDENT_FINISHED' && activeStudent && (
-        <div className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6 lg:px-8 font-sans">
-          <div className="max-w-2xl mx-auto">
-            
-            {/* Header Success Card */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 text-center relative overflow-hidden mb-6">
-              <div className="absolute top-0 inset-x-0 h-2 bg-emerald-500"></div>
+      {role === 'STUDENT_FINISHED' && activeStudent && (() => {
+        const metrics = getStudentMetrics(activeStudent, questions);
+        return (
+          <div className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6 lg:px-8 font-sans">
+            <div className="max-w-2xl mx-auto">
               
-              <div className="inline-flex items-center justify-center p-3 bg-emerald-50 rounded-full text-emerald-500 mb-4">
-                <CheckCircle2 className="w-12 h-12" />
-              </div>
-
-              <h1 className="text-2xl font-black text-slate-900 tracking-tight">Jawaban Berhasil Dikirim!</h1>
-              <p className="mt-1 text-sm text-slate-500 font-mono">UJIAN SELESAI • DATA TERKAM REKAM AMAN</p>
-
-              {/* Student Metadata Card info */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 my-6 text-left space-y-1 text-sm">
-                <div className="flex justify-between"><span className="text-slate-400 font-medium">Nama Siswa:</span> <span className="font-bold text-slate-800">{activeStudent.name}</span></div>
-                <div className="flex justify-between"><span className="text-slate-400 font-medium">No Absen / Kelas:</span> <span className="font-bold text-slate-800">{activeStudent.absentNumber} / {activeStudent.studentClass}</span></div>
-                <div className="flex justify-between"><span className="text-slate-400 font-medium">Status Pengawasan:</span> <span className="text-green-600 font-bold flex items-center gap-1">Lulus Verifikasi ({activeStudent.violationCount} Pelanggaran)</span></div>
-              </div>
-
-              {/* Real-time score display */}
-              <div className="p-6 bg-slate-900 rounded-2xl text-white">
-                <span className="text-[10px] font-bold text-slate-400 tracking-widest uppercase block mb-1 font-mono">Nilai Hasil Ujian</span>
-                <div className="text-5xl font-black tracking-tight text-yellow-400 font-mono">
-                  {activeStudent.score !== undefined ? activeStudent.score.toFixed(1) : '0.0'}
+              {/* Header Success Card */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 text-center relative overflow-hidden mb-6">
+                <div className="absolute top-0 inset-x-0 h-2 bg-emerald-500"></div>
+                
+                <div className="inline-flex items-center justify-center p-3 bg-emerald-50 rounded-full text-emerald-500 mb-4">
+                  <CheckCircle2 className="w-12 h-12" />
                 </div>
-                <div className="text-xs text-slate-300 mt-2">
-                  Berhasil menjawab benar <strong className="text-white">{activeStudent.correctAnswersCount}</strong> dari <strong className="text-white">{activeStudent.totalQuestions}</strong> pertanyaan.
+
+                <h1 className="text-2xl font-black text-slate-900 tracking-tight">Jawaban Berhasil Dikirim!</h1>
+                <p className="mt-1 text-sm text-slate-500 font-mono">UJIAN SELESAI • DATA TERKAM REKAM AMAN</p>
+
+                {/* Student Metadata Card info */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 my-6 text-left space-y-1 text-sm">
+                  <div className="flex justify-between"><span className="text-slate-400 font-medium">Nama Siswa:</span> <span className="font-bold text-slate-800">{activeStudent.name}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400 font-medium">No Absen / Kelas:</span> <span className="font-bold text-slate-800">{activeStudent.absentNumber} / {activeStudent.studentClass}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400 font-medium">Status Pengawasan:</span> <span className="text-green-600 font-bold flex items-center gap-1">Lulus Verifikasi ({activeStudent.violationCount} Pelanggaran)</span></div>
+                </div>
+
+                {/* Real-time score display */}
+                <div className="p-6 bg-slate-900 rounded-2xl text-white">
+                  <span className="text-[10px] font-bold text-slate-400 tracking-widest uppercase block mb-1 font-mono">Nilai Hasil Ujian</span>
+                  <div className="text-5xl font-black tracking-tight text-yellow-400 font-mono">
+                    {metrics.score !== undefined ? metrics.score.toFixed(1) : '0.0'}
+                  </div>
+                  <div className="text-xs text-slate-300 mt-2">
+                    Berhasil menjawab benar <strong className="text-white">{metrics.correctAnswersCount}</strong> dari <strong className="text-white">{metrics.totalQuestions}</strong> pertanyaan.
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Navigation Back */}
-            <div className="text-center">
-              <button
-                id="btn-return-home"
-                onClick={() => {
-                  setCurrentStudentId('');
-                  localStorage.removeItem('active_student_id');
-                  setRole('SETUP');
-                }}
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 px-6 rounded-2xl transition duration-150 flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-              >
-                Selesai & Keluar Aplikasi
-                <ArrowRight className="w-4 h-4 text-slate-400 animate-pulse" />
-              </button>
-            </div>
+              {/* Navigation Back */}
+              <div className="text-center">
+                <button
+                  id="btn-return-home"
+                  onClick={() => {
+                    setCurrentStudentId('');
+                    localStorage.removeItem('active_student_id');
+                    setRole('SETUP');
+                  }}
+                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 px-6 rounded-2xl transition duration-150 flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                >
+                  Selesai & Keluar Aplikasi
+                  <ArrowRight className="w-4 h-4 text-slate-400 animate-pulse" />
+                </button>
+              </div>
 
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 4. MASTER ADMIN DASHBOARD CONSOLE */}
       {role === 'ADMIN' && (
