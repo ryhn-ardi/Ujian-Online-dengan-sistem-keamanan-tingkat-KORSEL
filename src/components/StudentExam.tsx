@@ -103,14 +103,30 @@ export default function StudentExam({
   const [isCurrentlyFullscreen, setIsCurrentlyFullscreen] = useState(!!document.fullscreenElement);
   const [examStatus, setExamStatus] = useState(student.status);
   const [isUnlockedOnServer, setIsUnlockedOnServer] = useState(false);
+  const [isGraceActive, setIsGraceActive] = useState(false);
+
+  const isFullscreenSupported = typeof document !== 'undefined' && !!(
+    document.documentElement?.requestFullscreen ||
+    (document.documentElement as any)?.webkitRequestFullscreen ||
+    (document.documentElement as any)?.mozRequestFullScreen ||
+    (document.documentElement as any)?.msRequestFullscreen
+  );
 
   // Keep local exam status synchronized with student.status prop
   useEffect(() => {
     // If the student was locked locally, and the incoming student.status from Firestore is "SEDANG_MENGERJAKAN",
     // it means the Proctor/Admin just unlocked this student!
-    // To resolve the mobile fullscreen lock-out trap and ensure a clean re-entry slate, we reload the page.
+    // We direct the user instantly back to the exam questions, bypass the fullscreen lock, and activate a grace period.
     if (examStatus === 'TERKUNCI' && student.status === 'SEDANG_MENGERJAKAN') {
-      window.location.reload();
+      setExamStatus('SEDANG_MENGERJAKAN');
+      setIsCurrentlyFullscreen(true); // Pretend they are in full screen to bypass warning layout
+      setIsGraceActive(true); // Ignore focus, resize, or blur events momentarily
+      setIsUnlockedOnServer(false);
+
+      // Keep grace period active for 10 seconds to allow the student to settle back in comfortably
+      setTimeout(() => {
+        setIsGraceActive(false);
+      }, 10000);
       return;
     }
 
@@ -119,6 +135,32 @@ export default function StudentExam({
       setIsUnlockedOnServer(false);
     }
   }, [student.status, examStatus]);
+
+  // Periodic fallback status checks every 2.5s when locked (prevents network sleep issues on iOS/Android suspension)
+  useEffect(() => {
+    if (examStatus !== 'TERKUNCI') return;
+
+    const interval = setInterval(async () => {
+      try {
+        const serverStudent = await getStudentFromServer(student.id);
+        if (serverStudent && serverStudent.status !== 'TERKUNCI') {
+          setExamStatus('SEDANG_MENGERJAKAN');
+          setIsCurrentlyFullscreen(true);
+          setIsGraceActive(true);
+          setIsUnlockedOnServer(false);
+          onViolation('unlocked_locally');
+
+          setTimeout(() => {
+            setIsGraceActive(false);
+          }, 10000);
+        }
+      } catch (err) {
+        console.error('Background check status failed:', err);
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [examStatus, student.id]);
 
   // Synchronize local answers state if student answers are reset/modified from parent (e.g. locks/resets)
   useEffect(() => {
@@ -183,6 +225,7 @@ export default function StudentExam({
 
   const triggerViolation = (reason: string) => {
     if (config.strictSecurityEnabled === false) return; // Ignore if security is off
+    if (isGraceActive) return; // Skip if proctor just unlocked student (grace period active)
 
     const now = Date.now();
     if (now - lastViolationTime.current < 2500) return; // Prevent double trigger
@@ -338,13 +381,21 @@ export default function StudentExam({
       const serverStudent = await getStudentFromServer(student.id);
       if (serverStudent) {
         if (serverStudent.status !== 'TERKUNCI') {
-          setStatusMessage('KUNCI TELAH DIBUKA OLEH PROKTOR! Mensinkronisasikan status & memuat ulang lembar ujian Anda...');
+          setStatusMessage('KUNCI TELAH DIBUKA OLEH PROKTOR! Membuka halaman ujian...');
           setIsUnlockedOnServer(true);
           onViolation('unlocked_locally');
           
-          // Automatically trigger page reload after 1.5 seconds so the student returns cleanly
+          // Smooth transition to active exam and set grace period without full page reload
           setTimeout(() => {
-            window.location.reload();
+            setExamStatus('SEDANG_MENGERJAKAN');
+            setIsCurrentlyFullscreen(true);
+            setIsGraceActive(true);
+            setIsUnlockedOnServer(false);
+            setStatusMessage('');
+
+            setTimeout(() => {
+              setIsGraceActive(false);
+            }, 10000);
           }, 1500);
         } else {
           setStatusMessage('Sesi Anda masih Terkunci pada sistem Proktor. Silakan lapor ke pengawas Anda untuk menekan tombol "Unlock" terlebih dahulu.');
@@ -475,7 +526,7 @@ export default function StudentExam({
   }
 
   // 1b. --- RENDERING: BLOCKED SCENE IF EXITING FULLSCREEN ---
-  if (config.strictSecurityEnabled !== false && !isCurrentlyFullscreen && examStatus === 'SEDANG_MENGERJAKAN') {
+  if (config.strictSecurityEnabled !== false && isFullscreenSupported && !isCurrentlyFullscreen && !isGraceActive && examStatus === 'SEDANG_MENGERJAKAN') {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4 text-white text-center font-sans">
         <div className="max-w-md w-full bg-slate-900 border border-red-500/30 rounded-2xl p-8 shadow-2xl relative overflow-hidden">
@@ -614,6 +665,28 @@ export default function StudentExam({
         
         {/* Left Hand: Question Box */}
         <section className="lg:col-span-2 space-y-6">
+          {isGraceActive && (
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm animate-pulse">
+              <div className="flex items-center gap-2.5 text-xs text-emerald-800 font-bold">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping shrink-0" />
+                <span>UJIAN DIAKTIFKAN KEMBALI! Silakan lanjut mengerjakan soal.</span>
+              </div>
+              {isFullscreenSupported && (
+                <button
+                  type="button"
+                  id="btn-re-enter-fs-grace"
+                  onClick={async () => {
+                    await requestFullscreen();
+                    setIsGraceActive(false);
+                  }}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] rounded-lg tracking-wide uppercase cursor-pointer"
+                >
+                  Aktifkan Layar Penuh
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="bg-white rounded-2xl shadow-xs border border-slate-200/80 p-6 md:p-8 relative">
             
             {/* Index heading */}
