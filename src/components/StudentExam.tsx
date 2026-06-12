@@ -302,24 +302,40 @@ export default function StudentExam({
 
   const handleAutoUnlockCheck = async () => {
     setIsCheckingStatus(true);
-    setStatusMessage('');
+    setStatusMessage('Meminta izin Layar Penuh...');
+    
+    // Crucial: We request fullscreen immediately & synchronously inside the click handler to satisfy browser security rules
+    await requestFullscreen();
+    
     try {
       const serverStudent = await getStudentFromServer(student.id);
       if (serverStudent) {
         if (serverStudent.status !== 'TERKUNCI') {
           setStatusMessage('Kunci berhasil dibuka oleh Proktor! Menghubungkan...');
-          await requestFullscreen();
           setExamStatus('SEDANG_MENGERJAKAN');
           onViolation('unlocked_locally');
         } else {
           setStatusMessage('Sesi Anda masih Terkunci pada sistem Proktor. Silakan lapor ke pengawas Anda.');
+          // Exit fullscreen if they are still blocked
+          if (document.fullscreenElement) {
+            document.exitFullscreen().catch(() => {});
+          }
+          setIsCurrentlyFullscreen(false);
         }
       } else {
         setStatusMessage('Gagal mengambil data terbaru. Coba lagi.');
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        }
+        setIsCurrentlyFullscreen(false);
       }
     } catch (err) {
       console.error(err);
       setStatusMessage('Kesalahan koneksi server.');
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+      setIsCurrentlyFullscreen(false);
     } finally {
       setIsCheckingStatus(false);
     }
