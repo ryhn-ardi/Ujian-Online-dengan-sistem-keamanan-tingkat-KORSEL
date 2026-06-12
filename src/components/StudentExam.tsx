@@ -193,6 +193,8 @@ export default function StudentExam({
     if (examStatus !== 'SEDANG_MENGERJAKAN') return;
     if (config.strictSecurityEnabled === false) return; // Ignore if security is off
 
+    let blurTimeout: NodeJS.Timeout | null = null;
+
     const handleFullscreenChange = () => {
       const isFs = !!document.fullscreenElement;
       setIsCurrentlyFullscreen(isFs);
@@ -208,8 +210,21 @@ export default function StudentExam({
     };
 
     const handleWindowBlur = () => {
-      // Let standard browser clicks settle, only trigger blur if actually losing active focus
-      triggerViolation('Membuka Aplikasi Lain / Melakukan Split Screen / Floating Apps');
+      // iOS silent mode toggle physical switch causes transient focus blur because of system HUD.
+      // We introduce a brief grace check: only trigger if focus doesn't return or is actually hidden after 2 seconds.
+      if (blurTimeout) clearTimeout(blurTimeout);
+      blurTimeout = setTimeout(() => {
+        if (!document.hasFocus() || document.hidden) {
+          triggerViolation('Membuka Aplikasi Lain / Melakukan Split Screen / Floating Apps');
+        }
+      }, 2000);
+    };
+
+    const handleWindowFocus = () => {
+      if (blurTimeout) {
+        clearTimeout(blurTimeout);
+        blurTimeout = null;
+      }
     };
 
     const handleResize = () => {
@@ -227,15 +242,18 @@ export default function StudentExam({
       document.addEventListener('fullscreenchange', handleFullscreenChange);
       document.addEventListener('visibilitychange', handleVisibilityChange);
       window.addEventListener('blur', handleWindowBlur);
+      window.addEventListener('focus', handleWindowFocus);
       window.addEventListener('resize', handleResize);
       examStartedRef.current = true;
     }, 1500);
 
     return () => {
       clearTimeout(setupTimer);
+      if (blurTimeout) clearTimeout(blurTimeout);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('focus', handleWindowFocus);
       window.removeEventListener('resize', handleResize);
     };
   }, [examStatus, config.strictSecurityEnabled]);

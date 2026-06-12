@@ -49,6 +49,17 @@ export function getStudentMetrics(s: Student, questionsList: Question[]) {
   };
 }
 
+export function formatHourMinuteSecond(isoStr?: string) {
+  if (!isoStr) return '-';
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return '-';
+    return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch (e) {
+    return '-';
+  }
+}
+
 interface AdminPanelProps {
   students: Student[];
   questions: Question[];
@@ -76,7 +87,8 @@ export default function AdminPanel({
   const [selectedClassFilter, setSelectedClassFilter] = useState('all');
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState('all');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('all');
-  const [selectedScoreFilter, setSelectedScoreFilter] = useState('all');
+  const [minScoreFilter, setMinScoreFilter] = useState<string>('');
+  const [maxScoreFilter, setMaxScoreFilter] = useState<string>('');
 
   // Student editor modals state
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
@@ -116,15 +128,19 @@ export default function AdminPanel({
     const displayScore = s.status === 'SELESAI' ? metrics.score : s.score;
 
     let matchesScore = true;
-    if (selectedScoreFilter !== 'all') {
+    const minVal = minScoreFilter.trim() !== '' ? parseFloat(minScoreFilter) : null;
+    const maxVal = maxScoreFilter.trim() !== '' ? parseFloat(maxScoreFilter) : null;
+
+    if (minVal !== null || maxVal !== null) {
       if (displayScore === undefined) {
         matchesScore = false;
-      } else if (selectedScoreFilter === 'low') {
-        matchesScore = displayScore < 70;
-      } else if (selectedScoreFilter === 'mid') {
-        matchesScore = displayScore >= 70 && displayScore <= 85;
-      } else if (selectedScoreFilter === 'high') {
-        matchesScore = displayScore > 85;
+      } else {
+        if (minVal !== null && !isNaN(minVal) && displayScore < minVal) {
+          matchesScore = false;
+        }
+        if (maxVal !== null && !isNaN(maxVal) && displayScore > maxVal) {
+          matchesScore = false;
+        }
       }
     }
 
@@ -135,7 +151,8 @@ export default function AdminPanel({
     selectedClassFilter !== 'all' || 
     selectedSubjectFilter !== 'all' ||
     selectedStatusFilter !== 'all' ||
-    selectedScoreFilter !== 'all';
+    minScoreFilter.trim() !== '' ||
+    maxScoreFilter.trim() !== '';
 
   const handleDownloadTemplate = () => {
     const headers = [
@@ -1004,36 +1021,32 @@ export default function AdminPanel({
                       <option value="BELUM_MULAI">Belum Mulai ({students.filter(s => s.status === 'BELUM_MULAI').length})</option>
                     </select>
                   </div>
-
-                  {/* Filter Rentang Nilai Drops */}
+                  {/* Filter Rentang Nilai Manual */}
                   <div className="flex items-center gap-1.5 w-full sm:w-auto shrink-0">
                     <span className="text-[11px] font-bold text-slate-400 uppercase font-mono sm:inline hidden">Nilai:</span>
-                    <select
-                      value={selectedScoreFilter}
-                      onChange={(e) => setSelectedScoreFilter(e.target.value)}
-                      className="w-full sm:w-auto px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-indigo-500"
-                    >
-                      <option value="all">Semua Nilai ({students.filter(s => {
-                        const m = getStudentMetrics(s, questions);
-                        const scoreVal = s.status === 'SELESAI' ? m.score : s.score;
-                        return scoreVal !== undefined;
-                      }).length})</option>
-                      <option value="low">Rendah (&lt; 70) ({students.filter(s => {
-                        const m = getStudentMetrics(s, questions);
-                        const scoreVal = s.status === 'SELESAI' ? m.score : s.score;
-                        return scoreVal !== undefined && scoreVal < 70;
-                      }).length})</option>
-                      <option value="mid">Sedang (70 - 85) ({students.filter(s => {
-                        const m = getStudentMetrics(s, questions);
-                        const scoreVal = s.status === 'SELESAI' ? m.score : s.score;
-                        return scoreVal !== undefined && scoreVal >= 70 && scoreVal <= 85;
-                      }).length})</option>
-                      <option value="high">Tinggi (&gt; 85) ({students.filter(s => {
-                        const m = getStudentMetrics(s, questions);
-                        const scoreVal = s.status === 'SELESAI' ? m.score : s.score;
-                        return scoreVal !== undefined && scoreVal > 85;
-                      }).length})</option>
-                    </select>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        id="input-min-score"
+                        value={minScoreFilter}
+                        onChange={(e) => setMinScoreFilter(e.target.value)}
+                        placeholder="Min (0)"
+                        min="0"
+                        max="100"
+                        className="w-24 px-2 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 placeholder:text-slate-300 focus:outline-none focus:border-indigo-500 font-mono text-center"
+                      />
+                      <span className="text-slate-400 font-mono text-xs">-</span>
+                      <input
+                        type="number"
+                        id="input-max-score"
+                        value={maxScoreFilter}
+                        onChange={(e) => setMaxScoreFilter(e.target.value)}
+                        placeholder="Maks (100)"
+                        min="0"
+                        max="100"
+                        className="w-24 px-2 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 placeholder:text-slate-300 focus:outline-none focus:border-indigo-500 font-mono text-center"
+                      />
+                    </div>
                   </div>
 
                   {isFilterActive && (
@@ -1045,7 +1058,8 @@ export default function AdminPanel({
                         setSelectedClassFilter('all');
                         setSelectedSubjectFilter('all');
                         setSelectedStatusFilter('all');
-                        setSelectedScoreFilter('all');
+                        setMinScoreFilter('');
+                        setMaxScoreFilter('');
                       }}
                       className="w-full sm:w-auto px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-800 border border-rose-200 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 shrink-0"
                     >
@@ -1081,6 +1095,7 @@ export default function AdminPanel({
                         <th className="px-6 py-3">Informasi Siswa</th>
                         <th className="px-6 py-3">Kelas</th>
                         <th className="px-6 py-3">Status Proktor</th>
+                        <th className="px-6 py-3">Waktu Ujian</th>
                         <th className="px-6 py-3">Pelanggaran</th>
                         <th className="px-6 py-3">Jawaban</th>
                         <th className="px-6 py-3">Nilai</th>
@@ -1133,6 +1148,20 @@ export default function AdminPanel({
                                   </div>
                                 </div>
                               )}
+                            </td>
+                            <td className="px-6 py-4 font-mono text-xs whitespace-nowrap">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[10px] text-slate-400 w-10">Mulai:</span>
+                                  <span className="text-slate-700 font-bold">{formatHourMinuteSecond(s.startTime)}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[10px] text-slate-400 w-10">Selesai:</span>
+                                  <span className={s.status === 'SELESAI' ? 'text-emerald-600 font-extrabold' : 'text-slate-400 font-medium'}>
+                                    {formatHourMinuteSecond(s.endTime)}
+                                  </span>
+                                </div>
+                              </div>
                             </td>
                             <td className="px-6 py-4 text-center font-mono font-semibold">
                               <span className={s.violationCount > 0 ? 'text-red-600 font-bold' : 'text-slate-400'}>
