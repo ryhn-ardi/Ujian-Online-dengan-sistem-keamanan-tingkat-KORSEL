@@ -106,11 +106,19 @@ export default function StudentExam({
 
   // Keep local exam status synchronized with student.status prop
   useEffect(() => {
+    // If the student was locked locally, and the incoming student.status from Firestore is "SEDANG_MENGERJAKAN",
+    // it means the Proctor/Admin just unlocked this student!
+    // To resolve the mobile fullscreen lock-out trap and ensure a clean re-entry slate, we reload the page.
+    if (examStatus === 'TERKUNCI' && student.status === 'SEDANG_MENGERJAKAN') {
+      window.location.reload();
+      return;
+    }
+
     setExamStatus(student.status);
     if (student.status === 'SEDANG_MENGERJAKAN') {
       setIsUnlockedOnServer(false);
     }
-  }, [student.status]);
+  }, [student.status, examStatus]);
 
   // Synchronize local answers state if student answers are reset/modified from parent (e.g. locks/resets)
   useEffect(() => {
