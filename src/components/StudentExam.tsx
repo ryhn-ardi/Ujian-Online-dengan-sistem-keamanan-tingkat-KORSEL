@@ -101,6 +101,12 @@ export default function StudentExam({
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [isCurrentlyFullscreen, setIsCurrentlyFullscreen] = useState(!!document.fullscreenElement);
+  const [examStatus, setExamStatus] = useState(student.status);
+
+  // Keep local exam status synchronized with student.status prop
+  useEffect(() => {
+    setExamStatus(student.status);
+  }, [student.status]);
 
   // Synchronize local answers state if student answers are reset/modified from parent (e.g. locks/resets)
   useEffect(() => {
@@ -114,7 +120,7 @@ export default function StudentExam({
 
   // Set up timer based on remaining time
   useEffect(() => {
-    if (student.status !== 'SEDANG_MENGERJAKAN') return;
+    if (examStatus !== 'SEDANG_MENGERJAKAN') return;
 
     if (!student.startTime) {
       // First time starting
@@ -127,11 +133,11 @@ export default function StudentExam({
       const remain = Math.max(0, Math.floor((end - Date.now()) / 1000));
       setTimeRemaining(remain);
     }
-  }, [student.status, student.startTime, student.endTime, config.durationMinutes]);
+  }, [examStatus, student.startTime, student.endTime, config.durationMinutes]);
 
   // Countdown clock loop
   useEffect(() => {
-    if (student.status !== 'SEDANG_MENGERJAKAN' || timeRemaining <= 0) return;
+    if (examStatus !== 'SEDANG_MENGERJAKAN' || timeRemaining <= 0) return;
 
     const interval = setInterval(() => {
       setTimeRemaining((prev) => {
@@ -146,7 +152,7 @@ export default function StudentExam({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [student.status, timeRemaining]);
+  }, [examStatus, timeRemaining]);
 
   // Request Fullscreen on entering active exam state
   const requestFullscreen = async () => {
@@ -180,7 +186,7 @@ export default function StudentExam({
 
   // Monitor Fullscreen Exit and Focus shifts (THE PROCTOR SENTINELS)
   useEffect(() => {
-    if (student.status !== 'SEDANG_MENGERJAKAN') return;
+    if (examStatus !== 'SEDANG_MENGERJAKAN') return;
     if (config.strictSecurityEnabled === false) return; // Ignore if security is off
 
     const handleFullscreenChange = () => {
@@ -228,7 +234,7 @@ export default function StudentExam({
       window.removeEventListener('blur', handleWindowBlur);
       window.removeEventListener('resize', handleResize);
     };
-  }, [student.status, config.strictSecurityEnabled]);
+  }, [examStatus, config.strictSecurityEnabled]);
 
   const handleSelectOption = (questionId: string, optionIndex: number) => {
     const questionObj = questions.find(q => q.id === questionId);
@@ -287,7 +293,7 @@ export default function StudentExam({
       // Force request fullscreen and unlock
       requestFullscreen();
       // Directly trigger reset local status
-      student.status = 'SEDANG_MENGERJAKAN';
+      setExamStatus('SEDANG_MENGERJAKAN');
       onViolation('unlocked_locally');
     } else {
       setLocalPasscodeError('Kata sandi pengawas keliru!');
@@ -303,8 +309,7 @@ export default function StudentExam({
         if (serverStudent.status !== 'TERKUNCI') {
           setStatusMessage('Kunci berhasil dibuka oleh Proktor! Menghubungkan...');
           await requestFullscreen();
-          student.status = 'SEDANG_MENGERJAKAN';
-          student.lockedReason = undefined;
+          setExamStatus('SEDANG_MENGERJAKAN');
           onViolation('unlocked_locally');
         } else {
           setStatusMessage('Sesi Anda masih Terkunci pada sistem Proktor. Silakan lapor ke pengawas Anda.');
@@ -327,7 +332,7 @@ export default function StudentExam({
   };
 
   // 1. --- RENDERING: TERKUNCI MODE (BLOCKED EXAM) ---
-  if (student.status === 'TERKUNCI') {
+  if (examStatus === 'TERKUNCI') {
     return (
       <div className="fixed inset-0 bg-red-600 flex flex-col justify-center items-center p-6 text-white text-center z-50 overflow-hidden font-sans">
         <div className="max-w-md w-full bg-red-700/80 rounded-3xl p-8 border border-white/20 shadow-2xl backdrop-blur-md">
@@ -414,7 +419,7 @@ export default function StudentExam({
   }
 
   // 1b. --- RENDERING: BLOCKED SCENE IF EXITING FULLSCREEN ---
-  if (config.strictSecurityEnabled !== false && !isCurrentlyFullscreen && student.status === 'SEDANG_MENGERJAKAN') {
+  if (config.strictSecurityEnabled !== false && !isCurrentlyFullscreen && examStatus === 'SEDANG_MENGERJAKAN') {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4 text-white text-center font-sans">
         <div className="max-w-md w-full bg-slate-900 border border-red-500/30 rounded-2xl p-8 shadow-2xl relative overflow-hidden">
@@ -467,7 +472,7 @@ export default function StudentExam({
   }
 
   // 2. --- RENDERING: PINDAH LAYAR PENUH INTI ---
-  if (student.status === 'BELUM_MULAI') {
+  if (examStatus === 'BELUM_MULAI') {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col justify-center items-center p-4 text-white text-center font-sans">
         <div className="max-w-md w-full bg-slate-800 rounded-2xl p-8 border border-slate-700 shadow-xl">
