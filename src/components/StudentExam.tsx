@@ -312,10 +312,16 @@ export default function StudentExam({
       const serverStudent = await getStudentFromServer(student.id);
       if (serverStudent) {
         if (serverStudent.status !== 'TERKUNCI') {
-          setStatusMessage('KUNCI TERBUKA! Proktor telah membuka kunci Anda. Silakan klik tombol kuning di bawah untuk melanjutkan ujian.');
+          setStatusMessage('KUNCI TELAH DIBUKA OLEH PROKTOR! Mensinkronisasikan status & memuat ulang lembar ujian Anda...');
           setIsUnlockedOnServer(true);
+          onViolation('unlocked_locally');
+          
+          // Automatically trigger page reload after 1.5 seconds so the student returns cleanly
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
         } else {
-          setStatusMessage('Sesi Anda masih Terkunci pada sistem Proktor. Silakan minta pengawas Anda untuk menekan tombol "Unlock" terlebih dahulu.');
+          setStatusMessage('Sesi Anda masih Terkunci pada sistem Proktor. Silakan lapor ke pengawas Anda untuk menekan tombol "Unlock" terlebih dahulu.');
           setIsUnlockedOnServer(false);
         }
       } else {
