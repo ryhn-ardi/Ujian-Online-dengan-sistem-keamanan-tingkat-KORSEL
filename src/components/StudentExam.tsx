@@ -6,6 +6,11 @@ import { getStudentFromServer } from '../utils/sync';
 // Synthesizer Siren Alarm (Emergency high-frequency sweeping pitch)
 function playSirenAlarm() {
   try {
+    // 1. Trigger repetitive intense physical vibration to make loud mechanical rattling noise on desks
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate([600, 200, 600, 200, 600, 200, 600, 200, 600, 200, 600]);
+    }
+
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContextClass) return;
     const ctx = new AudioContextClass();
@@ -31,8 +36,9 @@ function playSirenAlarm() {
     
     const oscGain1 = ctx.createGain();
     const oscGain2 = ctx.createGain();
-    oscGain1.gain.setValueAtTime(0.4, ctx.currentTime);
-    oscGain2.gain.setValueAtTime(0.3, ctx.currentTime);
+    // Maximize wave-shaping level
+    oscGain1.gain.setValueAtTime(0.8, ctx.currentTime);
+    oscGain2.gain.setValueAtTime(0.7, ctx.currentTime);
     
     osc1.connect(oscGain1);
     osc2.connect(oscGain2);
@@ -42,10 +48,10 @@ function playSirenAlarm() {
     
     mainGain.connect(ctx.destination);
     
-    // Play for 5 seconds with envelope
+    // Play with highly amplified envelope (+250% software boost)
     mainGain.gain.setValueAtTime(0, ctx.currentTime);
-    mainGain.gain.linearRampToValueAtTime(1.0, ctx.currentTime + 0.1); // Fast rise
-    mainGain.gain.setValueAtTime(1.0, ctx.currentTime + 4.7);
+    mainGain.gain.linearRampToValueAtTime(2.5, ctx.currentTime + 0.1); // Ultra-loud rise
+    mainGain.gain.setValueAtTime(2.5, ctx.currentTime + 4.7);
     mainGain.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 5.0); // Fast fall
     
     osc1.start();
@@ -297,6 +303,9 @@ export default function StudentExam({
         if (serverStudent.status !== 'TERKUNCI') {
           setStatusMessage('Kunci berhasil dibuka oleh Proktor! Menghubungkan...');
           await requestFullscreen();
+          student.status = 'SEDANG_MENGERJAKAN';
+          student.lockedReason = undefined;
+          onViolation('unlocked_locally');
         } else {
           setStatusMessage('Sesi Anda masih Terkunci pada sistem Proktor. Silakan lapor ke pengawas Anda.');
         }

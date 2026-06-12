@@ -63,6 +63,8 @@ export default function AdminPanel({
     return matchesSearch && matchesClass && matchesSubject;
   });
 
+  const isFilterActive = studentSearch.trim() !== '' || selectedClassFilter !== 'all' || selectedSubjectFilter !== 'all';
+
   const handleDownloadTemplate = () => {
     const headers = [
       'jenis_soal (MC/MR)',
@@ -388,16 +390,21 @@ export default function AdminPanel({
 
   // Unlock all locked students at once and reset their violations
   const handleUnlockAllStudents = () => {
-    const lockedStudents = students.filter((s) => s.status === 'TERKUNCI');
+    const targetStudents = isFilterActive ? filteredStudents : students;
+    const lockedStudents = targetStudents.filter((s) => s.status === 'TERKUNCI');
     if (lockedStudents.length === 0) {
-      alert('Tidak ada siswa yang berstatus TERKUNCI saat ini.');
+      alert(isFilterActive ? 'Tidak ada siswa yang berstatus TERKUNCI dalam filter aktif saat ini.' : 'Tidak ada siswa yang berstatus TERKUNCI saat ini.');
       return;
     }
-    if (!window.confirm(`Apakah Anda yakin ingin membuka kunci untuk seluruh (${lockedStudents.length}) siswa yang terblokir? (Jumlah pelanggaran mereka juga akan kembali ke 0)`)) {
+    const confirmMessage = isFilterActive
+      ? `Apakah Anda yakin ingin membuka kunci untuk seluruh (${lockedStudents.length}) siswa ter-filter yang terblokir? (Jumlah pelanggaran mereka juga akan kembali ke 0)`
+      : `Apakah Anda yakin ingin membuka kunci untuk seluruh (${lockedStudents.length}) siswa yang terblokir? (Jumlah pelanggaran mereka juga akan kembali ke 0)`;
+    if (!window.confirm(confirmMessage)) {
       return;
     }
+    const targetIds = new Set(lockedStudents.map(s => s.id));
     const updated = students.map((s) => {
-      if (s.status === 'TERKUNCI') {
+      if (targetIds.has(s.id)) {
         return {
           ...s,
           status: 'SEDANG_MENGERJAKAN' as const,
@@ -414,62 +421,90 @@ export default function AdminPanel({
 
   // Mass reset entire student violations to 0
   const handleResetAllViolations = () => {
-    const activeWithViolations = students.filter((s) => (s.violationCount || 0) > 0);
-    if (students.length === 0) {
+    const targetStudents = isFilterActive ? filteredStudents : students;
+    if (targetStudents.length === 0) {
       alert('Tidak ada data siswa untuk di-reset pelanggarannya.');
       return;
     }
-    if (!window.confirm('Apakah Anda yakin ingin MELAKUKAN RESET MASAL PELANGGARAN untuk seluruh siswa? Semua jumlah pelanggaran siswa akan kembali ke 0, dan yang berstatus TERKUNCI akan otomatis berada dalam status SEDANG_MENGERJAKAN kembali.')) {
+    const confirmMessage = isFilterActive
+      ? `Apakah Anda yakin ingin MELAKUKAN RESET MASAL PELANGGARAN untuk ${targetStudents.length} siswa ter-filter? Semua jumlah pelanggaran siswa ter-filter akan kembali ke 0, dan yang berstatus TERKUNCI akan otomatis berada dalam status SEDANG_MENGERJAKAN kembali.`
+      : 'Apakah Anda yakin ingin MELAKUKAN RESET MASAL PELANGGARAN untuk seluruh siswa? Semua jumlah pelanggaran siswa akan kembali ke 0, dan yang berstatus TERKUNCI akan otomatis berada dalam status SEDANG_MENGERJAKAN kembali.';
+    if (!window.confirm(confirmMessage)) {
       return;
     }
-    const updated = students.map((s) => ({
-      ...s,
-      violationCount: 0,
-      lockedReason: undefined,
-      status: s.status === 'TERKUNCI' ? ('SEDANG_MENGERJAKAN' as const) : s.status
-    }));
+    const targetIds = new Set(targetStudents.map(s => s.id));
+    const updated = students.map((s) => {
+      if (targetIds.has(s.id)) {
+        return {
+          ...s,
+          violationCount: 0,
+          lockedReason: undefined,
+          status: s.status === 'TERKUNCI' ? ('SEDANG_MENGERJAKAN' as const) : s.status
+        };
+      }
+      return s;
+    });
     onUpdateStudents(updated);
-    alert('Seluruh pelanggaran siswa berhasil di-reset bersih menjadi 0!');
+    alert(isFilterActive ? `Pelanggaran untuk ${targetStudents.length} siswa ter-filter berhasil di-reset bersih menjadi 0!` : 'Seluruh pelanggaran siswa berhasil di-reset bersih menjadi 0!');
   };
 
   // Mass reset entire student progress (reset to BELUM_MULAI with clean scores & answers)
   const handleResetAllStudents = () => {
-    if (students.length === 0) {
+    const targetStudents = isFilterActive ? filteredStudents : students;
+    if (targetStudents.length === 0) {
       alert('Tidak ada data siswa untuk diriset.');
       return;
     }
-    if (!window.confirm('Apakah Anda yakin ingin melakukan RESET MASAL seluruh pengerjaan siswa? Semua jawaban yang tersimpan akan dikosongkan dan sisa waktu pengerjaan akan diuji ulang dari awal.')) {
+    const confirmMessage = isFilterActive
+      ? `Apakah Anda yakin ingin melakukan RESET MASAL pengerjaan untuk ${targetStudents.length} siswa ter-filter? Semua jawaban yang tersimpan akan dikosongkan dan sisa waktu pengerjaan akan diuji ulang dari awal.`
+      : 'Apakah Anda yakin ingin melakukan RESET MASAL seluruh pengerjaan siswa? Semua jawaban yang tersimpan akan dikosongkan dan sisa waktu pengerjaan akan diuji ulang dari awal.';
+    if (!window.confirm(confirmMessage)) {
       return;
     }
-    const updated = students.map((s) => ({
-      ...s,
-      status: 'BELUM_MULAI' as const,
-      answers: {},
-      violationCount: 0,
-      lockedReason: undefined,
-      score: undefined,
-      correctAnswersCount: undefined,
-      startTime: undefined,
-      endTime: undefined
-    }));
+    const targetIds = new Set(targetStudents.map(s => s.id));
+    const updated = students.map((s) => {
+      if (targetIds.has(s.id)) {
+        return {
+          ...s,
+          status: 'BELUM_MULAI' as const,
+          answers: {},
+          violationCount: 0,
+          lockedReason: undefined,
+          score: undefined,
+          correctAnswersCount: undefined,
+          startTime: undefined,
+          endTime: undefined
+        };
+      }
+      return s;
+    });
     onUpdateStudents(updated);
-    alert('Progress pengerjaan seluruh siswa berhasil di-reset masal!');
+    alert(isFilterActive ? `Progress pengerjaan untuk ${targetStudents.length} siswa ter-filter berhasil di-reset masal!` : 'Progress pengerjaan seluruh siswa berhasil di-reset masal!');
   };
 
   // Delete all student records permanently
   const handleDeleteAllStudents = () => {
-    if (students.length === 0) {
+    const targetStudents = isFilterActive ? filteredStudents : students;
+    if (targetStudents.length === 0) {
       alert('Tidak ada data siswa yang bisa dihapus.');
       return;
     }
-    if (!window.confirm('PERINGATAN KERAS: Apakah Anda yakin ingin MENGHAPUS SELURUH riwayat ujian dan daftar siswa secara permanen dari database cloud?')) {
+    const warn1 = isFilterActive
+      ? `PERINGATAN KERAS: Apakah Anda yakin ingin MENGHAPUS (${targetStudents.length}) data siswa ter-filter secara permanen dari database cloud?`
+      : 'PERINGATAN KERAS: Apakah Anda yakin ingin MENGHAPUS SELURUH riwayat ujian dan daftar siswa secara permanen dari database cloud?';
+    if (!window.confirm(warn1)) {
       return;
     }
-    if (!window.confirm('Tindakan ini tidak bisa dibatalkan dan semua nilai siswa akan musnah. Konfirmasi sekali lagi untuk menghapus seluruh siswa?')) {
+    const warn2 = isFilterActive
+      ? `Tindakan ini tidak bisa dibatalkan dan semua nilai siswa ter-filter akan musnah. Konfirmasi sekali lagi untuk menghapus siswa ter-filter tersebut?`
+      : 'Tindakan ini tidak bisa dibatalkan dan semua nilai siswa akan musnah. Konfirmasi sekali lagi untuk menghapus seluruh siswa?';
+    if (!window.confirm(warn2)) {
       return;
     }
-    onUpdateStudents([]);
-    alert('Seluruh data siswa berhasil dihapus bersih!');
+    const targetIds = new Set(targetStudents.map(s => s.id));
+    const remaining = students.filter(s => !targetIds.has(s.id));
+    onUpdateStudents(remaining);
+    alert(isFilterActive ? `Sebanyak ${targetStudents.length} data siswa ter-filter berhasil dihapus bersih!` : 'Seluruh data siswa berhasil dihapus bersih!');
   };
 
   // --- ACTIONS: EXPORT NILAI TO EXCEL (CSV Format with excel compatibility) ---
@@ -725,7 +760,7 @@ export default function AdminPanel({
               </div>
             </div>
 
-            {/* Panel Kontrol Masal Pengawas / Proktor */}
+             {/* Panel Kontrol Masal Pengawas / Proktor */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2">
@@ -736,6 +771,16 @@ export default function AdminPanel({
                 </div>
                 <span className="px-2 py-0.5 text-[10px] bg-red-100 text-red-700 font-bold rounded font-mono">ADJUSTMENTS DISPATCHER</span>
               </div>
+
+              {isFilterActive && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 p-3.5 rounded-xl text-xs flex items-center gap-2 font-semibold animate-fade-in">
+                  <AlertTriangle className="w-4.5 h-4.5 text-amber-600 shrink-0" />
+                  <span>
+                    <strong>FILTER AKTIF DETEKSI:</strong> Tindakan masal di bawah (Buka Kunci, Reset Pelanggaran, Reset Sesi, Hapus) hanya akan berdampak khusus pada <strong>{filteredStudents.length} siswa</strong> yang lolos kriteria pencarian/filter aktif.
+                  </span>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <button
                   type="button"
@@ -744,7 +789,10 @@ export default function AdminPanel({
                   className="px-4 py-3.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 border border-indigo-200 hover:border-indigo-300 font-extrabold rounded-xl text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98] shadow-xs"
                 >
                   <KeyRound className="w-4 h-4 text-indigo-650" />
-                  Buka Kunci Semua ({students.filter(s => s.status === 'TERKUNCI').length})
+                  {isFilterActive 
+                    ? `Unlock Ter-filter (${filteredStudents.filter(s => s.status === 'TERKUNCI').length})`
+                    : `Buka Kunci Semua (${students.filter(s => s.status === 'TERKUNCI').length})`
+                  }
                 </button>
 
                 <button
@@ -754,7 +802,10 @@ export default function AdminPanel({
                   className="px-4 py-3.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 hover:text-emerald-800 border border-emerald-200 hover:border-emerald-300 font-extrabold rounded-xl text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98] shadow-xs"
                 >
                   <ShieldCheck className="w-4 h-4 text-emerald-650" />
-                  Reset Masal Pelanggaran ({students.filter(s => (s.violationCount || 0) > 0).length})
+                  {isFilterActive
+                    ? `Reset Pelanggaran Ter-filter (${filteredStudents.filter(s => (s.violationCount || 0) > 0).length})`
+                    : `Reset Masal Pelanggaran (${students.filter(s => (s.violationCount || 0) > 0).length})`
+                  }
                 </button>
 
                 <button
@@ -764,7 +815,10 @@ export default function AdminPanel({
                   className="px-4 py-3.5 bg-amber-50 hover:bg-amber-100 text-amber-700 hover:text-amber-805 border border-amber-200 hover:border-amber-300 font-extrabold rounded-xl text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98] shadow-xs"
                 >
                   <RefreshCw className="w-4 h-4 text-amber-650" />
-                  Reset Masal Sesi
+                  {isFilterActive
+                    ? `Reset Sesi Ter-filter (${filteredStudents.length})`
+                    : 'Reset Masal Sesi'
+                  }
                 </button>
 
                 <button
@@ -774,7 +828,10 @@ export default function AdminPanel({
                   className="px-4 py-3.5 bg-red-50 hover:bg-red-100 text-red-700 hover:text-red-800 border border-red-200 hover:border-red-305 font-extrabold rounded-xl text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98] shadow-xs"
                 >
                   <Trash2 className="w-4 h-4 text-red-650" />
-                  Hapus Semua Data
+                  {isFilterActive
+                    ? `Hapus Ter-filter (${filteredStudents.length})`
+                    : 'Hapus Semua Data'
+                  }
                 </button>
               </div>
             </div>

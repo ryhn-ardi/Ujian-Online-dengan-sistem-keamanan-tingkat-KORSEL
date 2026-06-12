@@ -33,20 +33,20 @@ export default function App() {
 
   // 1. Load initial states on mount
   useEffect(() => {
-    setStudents(getStudents());
-    setQuestions(getQuestions());
-    setConfig(getExamConfig());
+    setStudents([...getStudents()]);
+    setQuestions([...getQuestions()]);
+    setConfig({ ...getExamConfig() });
     setIsDbSynced(isInitialSyncCompleted());
 
     // 2. Subscribe to real-time tab updates
     const unsubscribe = subscribeToSync((syncType) => {
       if (syncType === 'SYNC_STUDENTS') {
         const freshStudents = getStudents();
-        setStudents(freshStudents);
+        setStudents([...freshStudents]);
       } else if (syncType === 'SYNC_QUESTIONS') {
-        setQuestions(getQuestions());
+        setQuestions([...getQuestions()]);
       } else if (syncType === 'SYNC_CONFIG') {
-        setConfig(getExamConfig());
+        setConfig({ ...getExamConfig() });
       }
       setIsDbSynced(isInitialSyncCompleted());
     });
