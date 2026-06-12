@@ -75,6 +75,8 @@ export default function AdminPanel({
   const [studentSearch, setStudentSearch] = useState('');
   const [selectedClassFilter, setSelectedClassFilter] = useState('all');
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState('all');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState('all');
+  const [selectedScoreFilter, setSelectedScoreFilter] = useState('all');
 
   // Student editor modals state
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
@@ -108,10 +110,32 @@ export default function AdminPanel({
     );
     const matchesClass = selectedClassFilter === 'all' || (s.studentClass || '') === selectedClassFilter;
     const matchesSubject = selectedSubjectFilter === 'all' || (s.subjectId || 'sub1') === selectedSubjectFilter;
-    return matchesSearch && matchesClass && matchesSubject;
+    const matchesStatus = selectedStatusFilter === 'all' || s.status === selectedStatusFilter;
+
+    const metrics = getStudentMetrics(s, questions);
+    const displayScore = s.status === 'SELESAI' ? metrics.score : s.score;
+
+    let matchesScore = true;
+    if (selectedScoreFilter !== 'all') {
+      if (displayScore === undefined) {
+        matchesScore = false;
+      } else if (selectedScoreFilter === 'low') {
+        matchesScore = displayScore < 70;
+      } else if (selectedScoreFilter === 'mid') {
+        matchesScore = displayScore >= 70 && displayScore <= 85;
+      } else if (selectedScoreFilter === 'high') {
+        matchesScore = displayScore > 85;
+      }
+    }
+
+    return matchesSearch && matchesClass && matchesSubject && matchesStatus && matchesScore;
   });
 
-  const isFilterActive = studentSearch.trim() !== '' || selectedClassFilter !== 'all' || selectedSubjectFilter !== 'all';
+  const isFilterActive = studentSearch.trim() !== '' || 
+    selectedClassFilter !== 'all' || 
+    selectedSubjectFilter !== 'all' ||
+    selectedStatusFilter !== 'all' ||
+    selectedScoreFilter !== 'all';
 
   const handleDownloadTemplate = () => {
     const headers = [
@@ -965,6 +989,53 @@ export default function AdminPanel({
                     </select>
                   </div>
 
+                  {/* Filter Status Drops */}
+                  <div className="flex items-center gap-1.5 w-full sm:w-auto shrink-0">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase font-mono sm:inline hidden">Status:</span>
+                    <select
+                      value={selectedStatusFilter}
+                      onChange={(e) => setSelectedStatusFilter(e.target.value)}
+                      className="w-full sm:w-auto px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="all">Semua Status ({students.length})</option>
+                      <option value="SELESAI">Selesai ({students.filter(s => s.status === 'SELESAI').length})</option>
+                      <option value="SEDANG_MENGERJAKAN">Sedang Mengerjakan ({students.filter(s => s.status === 'SEDANG_MENGERJAKAN').length})</option>
+                      <option value="TERKUNCI">Terblokir/Terkunci ({students.filter(s => s.status === 'TERKUNCI').length})</option>
+                      <option value="BELUM_MULAI">Belum Mulai ({students.filter(s => s.status === 'BELUM_MULAI').length})</option>
+                    </select>
+                  </div>
+
+                  {/* Filter Rentang Nilai Drops */}
+                  <div className="flex items-center gap-1.5 w-full sm:w-auto shrink-0">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase font-mono sm:inline hidden">Nilai:</span>
+                    <select
+                      value={selectedScoreFilter}
+                      onChange={(e) => setSelectedScoreFilter(e.target.value)}
+                      className="w-full sm:w-auto px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="all">Semua Nilai ({students.filter(s => {
+                        const m = getStudentMetrics(s, questions);
+                        const scoreVal = s.status === 'SELESAI' ? m.score : s.score;
+                        return scoreVal !== undefined;
+                      }).length})</option>
+                      <option value="low">Rendah (&lt; 70) ({students.filter(s => {
+                        const m = getStudentMetrics(s, questions);
+                        const scoreVal = s.status === 'SELESAI' ? m.score : s.score;
+                        return scoreVal !== undefined && scoreVal < 70;
+                      }).length})</option>
+                      <option value="mid">Sedang (70 - 85) ({students.filter(s => {
+                        const m = getStudentMetrics(s, questions);
+                        const scoreVal = s.status === 'SELESAI' ? m.score : s.score;
+                        return scoreVal !== undefined && scoreVal >= 70 && scoreVal <= 85;
+                      }).length})</option>
+                      <option value="high">Tinggi (&gt; 85) ({students.filter(s => {
+                        const m = getStudentMetrics(s, questions);
+                        const scoreVal = s.status === 'SELESAI' ? m.score : s.score;
+                        return scoreVal !== undefined && scoreVal > 85;
+                      }).length})</option>
+                    </select>
+                  </div>
+
                   {isFilterActive && (
                     <button
                       type="button"
@@ -973,6 +1044,8 @@ export default function AdminPanel({
                         setStudentSearch('');
                         setSelectedClassFilter('all');
                         setSelectedSubjectFilter('all');
+                        setSelectedStatusFilter('all');
+                        setSelectedScoreFilter('all');
                       }}
                       className="w-full sm:w-auto px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-800 border border-rose-200 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 shrink-0"
                     >
