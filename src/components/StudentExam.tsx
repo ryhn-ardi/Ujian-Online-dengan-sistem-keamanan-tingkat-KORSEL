@@ -102,10 +102,14 @@ export default function StudentExam({
   const [statusMessage, setStatusMessage] = useState('');
   const [isCurrentlyFullscreen, setIsCurrentlyFullscreen] = useState(!!document.fullscreenElement);
   const [examStatus, setExamStatus] = useState(student.status);
+  const [isUnlockedOnServer, setIsUnlockedOnServer] = useState(false);
 
   // Keep local exam status synchronized with student.status prop
   useEffect(() => {
     setExamStatus(student.status);
+    if (student.status === 'SEDANG_MENGERJAKAN') {
+      setIsUnlockedOnServer(false);
+    }
   }, [student.status]);
 
   // Synchronize local answers state if student answers are reset/modified from parent (e.g. locks/resets)
@@ -302,40 +306,26 @@ export default function StudentExam({
 
   const handleAutoUnlockCheck = async () => {
     setIsCheckingStatus(true);
-    setStatusMessage('Meminta izin Layar Penuh...');
-    
-    // Crucial: We request fullscreen immediately & synchronously inside the click handler to satisfy browser security rules
-    await requestFullscreen();
+    setStatusMessage('Menghubungkan ke proktor...');
     
     try {
       const serverStudent = await getStudentFromServer(student.id);
       if (serverStudent) {
         if (serverStudent.status !== 'TERKUNCI') {
-          setStatusMessage('Kunci berhasil dibuka oleh Proktor! Menghubungkan...');
-          setExamStatus('SEDANG_MENGERJAKAN');
-          onViolation('unlocked_locally');
+          setStatusMessage('KUNCI TERBUKA! Proktor telah membuka kunci Anda. Silakan klik tombol kuning di bawah untuk melanjutkan ujian.');
+          setIsUnlockedOnServer(true);
         } else {
-          setStatusMessage('Sesi Anda masih Terkunci pada sistem Proktor. Silakan lapor ke pengawas Anda.');
-          // Exit fullscreen if they are still blocked
-          if (document.fullscreenElement) {
-            document.exitFullscreen().catch(() => {});
-          }
-          setIsCurrentlyFullscreen(false);
+          setStatusMessage('Sesi Anda masih Terkunci pada sistem Proktor. Silakan minta pengawas Anda untuk menekan tombol "Unlock" terlebih dahulu.');
+          setIsUnlockedOnServer(false);
         }
       } else {
-        setStatusMessage('Gagal mengambil data terbaru. Coba lagi.');
-        if (document.fullscreenElement) {
-          document.exitFullscreen().catch(() => {});
-        }
-        setIsCurrentlyFullscreen(false);
+        setStatusMessage('Gagal mengambil data terbaru dari server. Coba lagi.');
+        setIsUnlockedOnServer(false);
       }
     } catch (err) {
       console.error(err);
-      setStatusMessage('Kesalahan koneksi server.');
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
-      }
-      setIsCurrentlyFullscreen(false);
+      setStatusMessage('Kesalahan koneksi ke server.');
+      setIsUnlockedOnServer(false);
     } finally {
       setIsCheckingStatus(false);
     }
@@ -393,13 +383,31 @@ export default function StudentExam({
             </button>
             
             {statusMessage ? (
-              <p className="text-xs text-yellow-300 font-semibold mt-2 leading-relaxed">
+              <p className="text-xs text-yellow-300 font-semibold mt-2 leading-relaxed font-sans">
                 {statusMessage}
               </p>
             ) : (
               <p className="text-[11px] text-emerald-200 mt-2 leading-tight">
                 Jika Proktor sudah membuka kunci Anda dari admin panel, klik tombol hijau di atas untuk langsung kembali melanjutkan ujian secara otomatis tanpa password.
               </p>
+            )}
+
+            {isUnlockedOnServer && (
+              <button
+                type="button"
+                id="btn-final-auto-unlock-enter-fs"
+                onClick={async () => {
+                  await requestFullscreen();
+                  setExamStatus('SEDANG_MENGERJAKAN');
+                  onViolation('unlocked_locally');
+                  setIsUnlockedOnServer(false);
+                  setStatusMessage('');
+                }}
+                className="mt-3.5 w-full bg-yellow-400 hover:bg-yellow-300 text-slate-950 font-black py-3.5 px-4 rounded-xl shadow-lg transition duration-150 flex items-center justify-center gap-2 text-xs uppercase tracking-wider animate-pulse cursor-pointer border border-white/20 active:scale-[0.98]"
+              >
+                <Play className="w-4 h-4 fill-current text-slate-950" />
+                Masuk Layar Ujian (Layar Penuh)
+              </button>
             )}
           </div>
 
